@@ -1,0 +1,32 @@
+Package: nccs.data.efile
+Title: NCCS IRS Form 990 E-File Producer
+Version: 0.0.0.9000
+Authors@R:
+    person("NCCS", role = c("aut", "cre"),
+           email = "thiyaghessan@gmail.com")
+Description: Producer pipeline for extracting structured data from IRS
+    Form 990 series e-file XML filings, publishing versioned parquet
+    outputs to s3://nccsdata/processed/efile/. Implements the design
+    pinned in decisions/0001-producer-design.md.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.2
+Depends:
+    R (>= 4.2.0)
+Imports:
+    arrow,
+    aws.s3,
+    cli,
+    digest,
+    furrr,
+    future,
+    jsonlite,
+    xml2,
+    yaml
+Suggests:
+    testthat (>= 3.0.0),
+    lintr,
+    styler
+Config/testthat/edition: 3

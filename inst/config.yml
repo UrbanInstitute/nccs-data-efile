@@ -1,0 +1,65 @@
+# nccs-data-efile producer configuration.
+#
+# Local and EC2 production modes share this file; differences are
+# expressed as profile overrides, not code branches. See ADR 0001 §4.
+
+default:
+  parallelism:
+    workers: 4
+    plan: multisession  # multisession | multicore
+
+  scope:
+    forms: ["990", "990PF"]
+    tax_years: [2020, 2021, 2022, 2023, 2024]
+    index_filter: ~  # optional regex or explicit key list for local slices
+
+  output:
+    s3_enabled: false
+    s3_prefix: "s3://nccsdata/processed/efile/"
+    local_dir: "out/"
+    phase: "phase0"
+    vintage: ~  # auto-derived as v{YYYY.MM} at run time if null
+
+  upstream:
+    primary: "gt_data_lake"  # gt_data_lake | irs_direct
+    gt_data_lake:
+      index_prefix: "s3://gt990datalake-rawdata/Indices/990xmls/"
+    irs_direct:
+      base_url: "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
+
+  vendored:
+    # Pinned SHA of NODC concordance file. See ADR 0001 §8 and open
+    # item #3. Must be set before first Phase 0 vintage build.
+    nodc_concordance_sha: ~
+    nodc_concordance_s3_prefix: "s3://nccsdata/processed/efile/concordance/"
+    irs_xsd_cache_s3_prefix: "s3://nccsdata/processed/efile/schemas/"
+
+  verification:
+    # Placeholder thresholds. Pin against first vintage's actual
+    # distribution per ADR 0001 §6 / open item #1.
+    sample_size_per_form_year: 1000
+    fields:
+      government_grants:
+        type: "double"
+        min: 0
+        max: 1.0e10
+        null_rate_min: 0.20
+        null_rate_max: 0.50
+      program_related_investments_total:
+        type: "double"
+        min: 0
+        max: 1.0e10
+        null_rate_min: 0.05
+        null_rate_max: 0.15
+
+  aws:
+    profile: "thiya"
+    region: "us-east-1"
+
+# Production overrides applied on EC2 c5.18xlarge.
+production:
+  parallelism:
+    workers: 72
+    plan: multisession
+  output:
+    s3_enabled: true

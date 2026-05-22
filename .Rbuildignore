@@ -1,0 +1,12 @@
+^decisions$
+^\.github$
+^renv$
+^renv\.lock$
+^out$
+^\.Rproj\.user$
+^.*\.Rproj$
+^LICENSE\.md$
+^README\.Rmd$
+^\.gitignore$
+^\.git$
+^\.claude$
