@@ -5,7 +5,7 @@
 #' summarizes the row-level diff, and (optionally) opens a GitHub
 #' issue against this repo via the `gh` CLI.
 #'
-#' See ADR 0001 §8. Intended to be cron-scheduled monthly per
+#' See ADR 0001 section 8. Intended to be cron-scheduled monthly per
 #' nccs-contracts ADR 0004 once the workflow lands.
 #'
 #' @param pinned_sha SHA currently vendored. Defaults to
@@ -84,7 +84,7 @@ read_nodc_at <- function(sha) {
 #' Summarize row-level diff between two NODC concordance frames.
 #'
 #' Identity is `variable_name` if present, else the first column. The
-#' summary is intentionally coarse — enough to triage drift, not to
+#' summary is intentionally coarse - enough to triage drift, not to
 #' replace a full review.
 #' @noRd
 summarize_nodc_diff <- function(old_df, new_df, max_sample = 20) {

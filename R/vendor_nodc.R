@@ -7,7 +7,7 @@
 #' skipped (the GitHub raw file at a given SHA is immutable, so this
 #' is safe).
 #'
-#' See ADR 0001 §8.
+#' See ADR 0001 section 8.
 #'
 #' @param sha Commit SHA to pin. Defaults to
 #'   `config$vendored$nodc_concordance_sha`.
@@ -36,7 +36,7 @@ vendor_nodc <- function(sha = NULL,
   s3_uri <- nodc_s3_uri(sha, s3_prefix, today = Sys.Date())
 
   if (s3_object_exists(s3_uri, aws_profile = aws_profile)) {
-    cli::cli_alert_info("NODC vendor: {s3_uri} already exists — skipping")
+    cli::cli_alert_info("NODC vendor: {s3_uri} already exists - skipping")
     return(invisible(list(
       sha = sha, s3_uri = s3_uri, uploaded = FALSE,
       bytes = NA_integer_, sha256 = NA_character_

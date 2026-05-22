@@ -26,31 +26,92 @@ default:
       index_prefix: "s3://gt990datalake-rawdata/Indices/990xmls/"
     irs_direct:
       base_url: "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
+      # ZIP URL pattern. Substitutions: {tax_year}, {month} (zero-padded).
+      # Open item - pin once the exact URL pattern is verified.
+      url_pattern: ~
 
   vendored:
-    # Pinned SHA of NODC concordance file. See ADR 0001 §8 and open
-    # item #3. Must be set before first Phase 0 vintage build.
-    nodc_concordance_sha: ~
+    # Pinned SHA of NODC concordance file. See ADR 0001 §8.
+    # Pinned 2026-05-22 from
+    # https://github.com/Nonprofit-Open-Data-Collective/irs-efile-master-concordance-file HEAD.
+    nodc_concordance_sha: "49f62af015ad56c4857273eff633166ba6c1a4da"
     nodc_concordance_s3_prefix: "s3://nccsdata/processed/efile/concordance/"
     irs_xsd_cache_s3_prefix: "s3://nccsdata/processed/efile/schemas/"
 
+  # Phase 0 published outputs. Each entry produces one
+  # {name}.parquet (plus dictionary + quality) under the vintage dir.
+  # `fields` references nccs_name values in the layer-2 dictionary.
+  phase0_outputs:
+    - name: "government_grants"
+      fields: ["government_grants"]
+    - name: "program_related_investments"
+      fields: ["program_related_investments_total"]
+
+  # Parquet writer options. zstd compression per contracts/efile.yml.
+  parquet:
+    compression: "zstd"
+
+  xsd:
+    # IRS XSD ZIP URL pattern (TEOS schemas page, public).
+    # Substitutions: {tax_year}, {version}. Version string is literal -
+    # IRS uses both "5.0" (2024) and "5-0" (2022, 2023); pass as-is.
+    # Source: https://www.irs.gov/charities-non-profits/tax-exempt-organization-search-teos-schemas
+    # Note: the most recent / upcoming PY schemas are behind IRS e-File
+    # provider login; only completed tax years are mirrored on TEOS.
+    url_pattern: "https://www.irs.gov/pub/irs-tege/990x-schema-{tax_year}v{version}.zip"
+    local_cache_dir: "~/.cache/nccs-data-efile/xsds"
+    # Per-tax-year list of versions to fetch + verify against. Each
+    # version is a separate IRS schema release. Phase 0 verification
+    # iterates the cross product (tax_year x version x claim).
+    versions:
+      "2020": ["4.0", "4.1", "4.2"]
+      "2021": ["4.0", "4.1", "4.2", "4.3"]
+      "2022": ["4-0", "4-1", "5-0"]
+      "2023": ["4-0", "5-0", "5-1"]
+      "2024": ["5.0"]
+    # Phase 0 XPath claims to verify per (tax_year, version).
+    # Source: ADR 0002 §"Two fields" (NODC concordance.csv inspection,
+    # 2026-05-22). expected_type "USAmountType" matches IRS efileTypes.xsd.
+    # If a verification run reports a different actual_type (e.g.
+    # "BigUSAmountType" in a newer XSD version), update here.
+    phase0_claims:
+      - field: "government_grants"
+        xpath: "/Return/ReturnData/IRS990/Form990PartVIII/GovernmentGrants"
+        expected_type: "USAmountType"
+      - field: "government_grants"
+        xpath: "/Return/ReturnData/IRS990/GovernmentGrants"
+        expected_type: "USAmountType"
+      - field: "government_grants"
+        xpath: "/Return/ReturnData/IRS990/GovernmentGrantsAmt"
+        expected_type: "USAmountType"
+      - field: "program_related_investments_total"
+        xpath: "/Return/ReturnData/IRS990PF/SumOfProgramRelatedInvestments/Total"
+        expected_type: "USAmountType"
+      - field: "program_related_investments_total"
+        xpath: "/Return/ReturnData/IRS990PF/SumOfProgramRelatedInvstGrp/TotalAmt"
+        expected_type: "USAmountType"
+
   verification:
-    # Placeholder thresholds. Pin against first vintage's actual
-    # distribution per ADR 0001 §6 / open item #1.
+    # Thresholds widened after 2026-05-22 dry-run (100 filings, 2024v5.0).
+    # Observed null rates: gov_grants 0.62 on 990; PRI 0.98 on 990PF.
+    # Both fields are sparse - only a minority of filers report them.
+    # Pin tighter once first full vintage runs (ADR 0001 open item #1).
     sample_size_per_form_year: 1000
     fields:
       government_grants:
         type: "double"
+        forms_applicable: ["990"]
         min: 0
-        max: 1.0e10
-        null_rate_min: 0.20
-        null_rate_max: 0.50
+        max: 1.0e+10
+        null_rate_min: 0.40
+        null_rate_max: 0.85
       program_related_investments_total:
         type: "double"
+        forms_applicable: ["990PF"]
         min: 0
-        max: 1.0e10
-        null_rate_min: 0.05
-        null_rate_max: 0.15
+        max: 1.0e+10
+        null_rate_min: 0.90
+        null_rate_max: 1.00
 
   aws:
     profile: "thiya"

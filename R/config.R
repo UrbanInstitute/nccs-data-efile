@@ -5,7 +5,7 @@
 #' top-level overrides; nested keys are merged one level deep.
 #'
 #' @param profile Profile name to overlay on `default`. `NULL` returns
-#'   the unmodified default block. ADR 0001 §4 ships `production` as
+#'   the unmodified default block. ADR 0001 section 4 ships `production` as
 #'   the EC2 overlay.
 #' @param path Explicit config path. Defaults to the installed
 #'   `inst/config.yml`.

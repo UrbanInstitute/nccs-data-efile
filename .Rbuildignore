@@ -10,3 +10,5 @@
 ^\.gitignore$
 ^\.git$
 ^\.claude$
+^inst/concordance/\.gitkeep$
+^LICENSE\.md$
