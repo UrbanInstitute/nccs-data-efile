@@ -37,4 +37,14 @@ load_config <- function(profile = NULL, path = NULL) {
   cfg
 }
 
+#' Null-coalescing operator
+#'
+#' Returns `a` if non-`NULL`, otherwise `b`. Exported so that the
+#' `inst/scripts/` entrypoints can use it after `library(nccs.data.efile)`
+#' even on R versions that predate the base `%||%` (introduced in R 4.4).
+#'
+#' @param a,b Any values; `a` is returned unless it is `NULL`.
+#' @return `a` if not `NULL`, otherwise `b`.
+#' @name grapes-or-or-grapes
+#' @export
 `%||%` <- function(a, b) if (is.null(a)) b else a
