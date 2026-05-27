@@ -66,12 +66,32 @@ run_phase0 <- function(config = load_config(),
   cli::cli_alert_info("index: {nrow(index)} filings in scope")
 
   setup_future_plan(config$parallelism)
-  cli::cli_alert_info("extracting in parallel ({future::nbrOfWorkers()} workers)")
-  rows <- furrr::future_map(
-    seq_len(nrow(index)),
-    function(i) extract_filing(index[i, ], dict, version = xsd_version),
+  n_workers <- future::nbrOfWorkers()
+  # Chunk the index outside the closure so it is passed to furrr as
+  # the *iteration argument* (chunked per worker) rather than captured
+  # as a closure global (broadcast in full to every worker). At
+  # 700k filings, the whole-index closure capture exceeds future's
+  # default 500 MiB global-broadcast guard. Oversubscribe by 4x to
+  # balance worker load when filing sizes vary.
+  chunk_size <- max(1L, ceiling(nrow(index) / (n_workers * 4L)))
+  chunk_id <- ceiling(seq_len(nrow(index)) / chunk_size)
+  index_chunks <- lapply(
+    split(seq_len(nrow(index)), chunk_id),
+    function(idxs) index[idxs, , drop = FALSE]
+  )
+  cli::cli_alert_info(
+    "extracting in parallel ({n_workers} workers, {length(index_chunks)} chunks of ~{chunk_size} filings)"
+  )
+  chunk_rows <- furrr::future_map(
+    index_chunks,
+    function(chunk_df) {
+      lapply(seq_len(nrow(chunk_df)), function(i) {
+        extract_filing(chunk_df[i, ], dict, version = xsd_version)
+      })
+    },
     .options = furrr::furrr_options(seed = TRUE)
   )
+  rows <- unlist(chunk_rows, recursive = FALSE)
   extracted <- do.call(rbind, rows)
 
   # Distribution thresholds in config are calibrated from a 100-filing
