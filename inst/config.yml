@@ -68,7 +68,24 @@ default:
       "2021": ["4.0", "4.1", "4.2", "4.3"]
       "2022": ["4-0", "4-1", "5-0"]
       "2023": ["4-0", "5-0", "5-1"]
-      "2024": ["5.0"]
+      "2024": ["5.0", "5.1", "5.2"]
+    # XSD inheritance: 2024v5.1 and 2024v5.2 schemas are not on the
+    # public TEOS page (they're only on the gated MeF developer
+    # portal). The GT 2024 yearly index shows ~58% of 990 filings and
+    # ~70% of 990PF filings declare returnVersion=5.1 or 5.2, so we
+    # can't skip them. Until we obtain those schemas (via SOI or MeF),
+    # verification reuses the 2024v5.0 XSDs and records the
+    # inheritance explicitly in the manifest. The empirical
+    # invariance of the Phase 0 XPaths across 5.x is tested
+    # separately by sampling filings; see Phase D validation log.
+    version_aliases:
+      "2024":
+        "5.1":
+          xsd_from: "5.0"
+          reason: "TEOS does not publish 2024v5.1; inheriting 2024v5.0 XSDs pending SOI/MeF retrieval."
+        "5.2":
+          xsd_from: "5.0"
+          reason: "TEOS does not publish 2024v5.2; inheriting 2024v5.0 XSDs pending SOI/MeF retrieval."
     # Phase 0 XPath claims to verify per (tax_year, version).
     # Source: ADR 0002 §"Two fields" (NODC concordance.csv inspection,
     # 2026-05-22). expected_type "USAmountType" matches IRS efileTypes.xsd.

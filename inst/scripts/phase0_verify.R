@@ -38,7 +38,15 @@ if (!is.null(config$xsd$url_pattern) && nzchar(config$xsd$url_pattern)) {
       ))
       next
     }
+    aliases <- (config$xsd$version_aliases %||% list())[[as.character(ty)]]
     for (v in vers) {
+      if (!is.null(aliases) && !is.null(aliases[[as.character(v)]])) {
+        message(sprintf(
+          "tax_year %s version %s is aliased to XSDs from %s; skipping fetch",
+          ty, v, aliases[[as.character(v)]]$xsd_from
+        ))
+        next
+      }
       fetch_xsds(tax_year = ty, version = v, config = config)
     }
   }

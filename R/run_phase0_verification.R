@@ -48,28 +48,37 @@ run_phase0_verification <- function(tax_years = NULL,
 
   rows <- list()
   for (ty in tax_years) {
-    vers <- if (is.null(versions)) {
-      discover_xsd_versions(ty, config)
-    } else {
+    vers <- if (!is.null(versions)) {
       versions[[as.character(ty)]]
+    } else if (!is.null(config$xsd$versions[[as.character(ty)]])) {
+      # Prefer configured versions so aliased cells (whose XSDs may
+      # not be in the disk cache) are still iterated.
+      config$xsd$versions[[as.character(ty)]]
+    } else {
+      discover_xsd_versions(ty, config)
     }
     if (length(vers) == 0) {
       cli::cli_alert_warning("No XSD versions found for tax_year {ty}; skipping")
       next
     }
     for (v in vers) {
+      alias <- resolve_xsd_version_alias(ty, v, config)
+      xsd_version <- if (is.null(alias)) v else alias$xsd_from
+      xsd_dir_override <- if (is.null(alias)) NULL else
+        xsd_cache_path(ty, alias$xsd_from, config)
       for (claim in claims) {
         r <- tryCatch(
           verify_xpath(
             xpath = claim$xpath,
             tax_year = ty,
-            version = v,
+            version = xsd_version,
             expected_type = claim$expected_type,
+            xsd_dir = xsd_dir_override,
             config = config
           ),
           error = function(e) {
             list(
-              xpath = claim$xpath, tax_year = ty, version = v,
+              xpath = claim$xpath, tax_year = ty, version = xsd_version,
               expected_type = claim$expected_type,
               found = FALSE, actual_type = NA_character_,
               matches_expected = FALSE,
@@ -78,6 +87,12 @@ run_phase0_verification <- function(tax_years = NULL,
             )
           }
         )
+        # Tag the row with the requested version (v), and record the
+        # alias source so the manifest can carry the inheritance.
+        r$version <- v
+        r$xsd_version_used <- xsd_version
+        r$aliased_from <- if (is.null(alias)) NA_character_ else alias$xsd_from
+        r$alias_reason <- if (is.null(alias)) NA_character_ else (alias$reason %||% NA_character_)
         rows[[length(rows) + 1]] <- c(list(field = claim$field), r)
       }
     }
@@ -111,8 +126,46 @@ run_phase0_verification <- function(tax_years = NULL,
     mismatches = mismatches,
     uncovered_cells = uncovered,
     field_coverage = cells,
-    results = results
+    results = results,
+    aliases = collect_aliases(rows)
   )
+}
+
+#' Resolve a (tax_year, version) to its alias target, if any.
+#'
+#' Reads `config$xsd$version_aliases`, which has the shape
+#' `version_aliases$<tax_year>$<version> = list(xsd_from = "X.Y",
+#' reason = "...")`. Returns the inner list, or `NULL` if no alias
+#' is declared for this cell.
+#' @noRd
+resolve_xsd_version_alias <- function(tax_year, version, config) {
+  aliases <- config$xsd$version_aliases
+  if (is.null(aliases)) return(NULL)
+  by_year <- aliases[[as.character(tax_year)]]
+  if (is.null(by_year)) return(NULL)
+  by_year[[as.character(version)]]
+}
+
+#' Summarize the alias relationships used across a verification run.
+#' Returns a list of unique (tax_year, version, xsd_from, reason)
+#' tuples actually applied.
+#' @noRd
+collect_aliases <- function(rows) {
+  seen <- list()
+  out <- list()
+  for (r in rows) {
+    if (is.na(r$aliased_from %||% NA)) next
+    key <- paste(r$tax_year, r$version, r$aliased_from, sep = "|")
+    if (key %in% seen) next
+    seen <- c(seen, key)
+    out[[length(out) + 1]] <- list(
+      tax_year = r$tax_year,
+      version = r$version,
+      xsd_from = r$aliased_from,
+      reason = r$alias_reason
+    )
+  }
+  out
 }
 
 #' Aggregate per-XPath results into per-(field, year, version) cells.
@@ -174,6 +227,8 @@ rows_to_df <- function(rows) {
     xpath            = vapply(rows, function(r) as.character(pick(r, "xpath")), character(1)),
     tax_year         = vapply(rows, function(r) as.character(pick(r, "tax_year")), character(1)),
     version          = vapply(rows, function(r) as.character(pick(r, "version")), character(1)),
+    xsd_version_used = vapply(rows, function(r) as.character(pick(r, "xsd_version_used")), character(1)),
+    aliased_from     = vapply(rows, function(r) as.character(pick(r, "aliased_from")), character(1)),
     expected_type    = vapply(rows, function(r) as.character(pick(r, "expected_type")), character(1)),
     actual_type      = vapply(rows, function(r) as.character(pick(r, "actual_type")), character(1)),
     found            = vapply(rows, function(r) isTRUE(pick(r, "found")), logical(1)),

@@ -57,7 +57,8 @@ emit_manifest <- function(vintage = NULL,
     xsd_verification = list(
       passed = isTRUE(xsd_verification$passed),
       checks_run = xsd_verification$checks_run %||% 0L,
-      mismatches = xsd_verification$mismatches %||% list()
+      mismatches = xsd_verification$mismatches %||% list(),
+      aliases = xsd_verification$aliases %||% list()
     ),
     value_distribution = value_distribution$per_field %||% list()
   )
