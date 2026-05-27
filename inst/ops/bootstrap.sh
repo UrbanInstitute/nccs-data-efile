@@ -87,10 +87,12 @@ Rscript -e 'renv::restore(prompt = FALSE)'
 
 # ---------------------------------------------------------------------------
 # Install the package itself into the renv library so that the entrypoint
-# scripts (`library(nccs.data.efile)`) work without pkgload.
+# scripts (`library(nccs.data.efile)`) work without pkgload. Use
+# renv::install(".") rather than R CMD INSTALL so the install lands in
+# the renv-managed library alongside its restored dependencies.
 # ---------------------------------------------------------------------------
 log "installing nccs.data.efile into the renv library"
-R CMD INSTALL --no-multiarch --with-keep.source .
+Rscript -e 'renv::install(".")'
 
 # ---------------------------------------------------------------------------
 # Smoke check
