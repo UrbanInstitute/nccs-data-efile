@@ -21,8 +21,10 @@
 #' @param config Loaded config list.
 #' @param dict Layer-2 dictionary data.frame.
 #' @param vintage Vintage string (`v2026.06`). Auto-derived if `NULL`.
-#' @param xsd_version XSD version label to resolve XPath claims for.
-#'   Phase 0 uses one version per build.
+#' @param xsd_version Optional XSD version label override. When
+#'   `NULL` (the default at scale), each filing's version is parsed
+#'   from its `return_version` column in the index. Pass an explicit
+#'   value only for single-version test slices.
 #' @param out_dir Output directory. Defaults to
 #'   `file.path(config$output$local_dir, vintage)`.
 #' @param skip_xsd_verification If `TRUE`, bypass the XSD check
@@ -36,7 +38,7 @@
 run_phase0 <- function(config = load_config(),
                        dict = load_dictionary(),
                        vintage = NULL,
-                       xsd_version,
+                       xsd_version = NULL,
                        out_dir = NULL,
                        skip_xsd_verification = FALSE,
                        index = NULL) {
@@ -72,8 +74,14 @@ run_phase0 <- function(config = load_config(),
   )
   extracted <- do.call(rbind, rows)
 
+  # Distribution thresholds in config are calibrated from a 100-filing
+  # dry-run; the first scale vintage's job is to *measure* the real
+  # distribution, not enforce one. Per-vintage strictness is opt-in
+  # via config$verification$strict; flip to TRUE once thresholds are
+  # pinned from a real vintage's observed values (ADR 0001 §6).
+  dist_strict <- isTRUE(config$verification$strict)
   dist_result <- verify_value_distribution(
-    extracted, config = config, strict = TRUE
+    extracted, config = config, strict = dist_strict
   )
 
   parquet_paths <- character(0)
@@ -144,22 +152,37 @@ write_phase0_output <- function(out_spec, extracted, dict, config,
   )
   cli::cli_alert_success("wrote {parquet_path}")
 
-  # Dictionary uses the first tax_year in scope to resolve XPath; the
-  # XPath itself is documented in the dictionary's xpath_claims cell
-  # for all (year, version) tuples. Picking one for source_xpath is a
-  # representative reference.
-  ty <- config$scope$tax_years[[1]]
+  # The dictionary CSV documents one representative XPath per output.
+  # Each row's actual extraction uses the per-filing version, but the
+  # dictionary's source_xpath column is a single string - pick the
+  # most recent (tax_year, version) in scope as the representative
+  # reference. The XPath in xpath_claims is in practice identical
+  # across in-scope tuples for the Phase 0 fields.
+  rep <- representative_xsd_version(config, fallback = xsd_version)
   emit_dictionary(
     output_name = out_spec$name,
     column_names = cols,
     dict = dict,
-    tax_year = ty,
-    version = xsd_version,
+    tax_year = rep$tax_year,
+    version = rep$version,
     nodc_concordance_sha = config$vendored$nodc_concordance_sha %||% NA_character_,
     out_dir = out_dir
   )
   emit_quality(out_spec$name, df, out_dir = out_dir)
   parquet_path
+}
+
+#' Pick a representative (tax_year, version) for the dictionary CSV's
+#' source_xpath column: the highest tax_year in scope, paired with
+#' the last configured version for that year. Falls back to `fallback`
+#' (the legacy `xsd_version` arg) if config can't resolve one.
+#' @noRd
+representative_xsd_version <- function(config, fallback = NULL) {
+  years <- config$scope$tax_years
+  ty <- if (length(years) > 0) as.character(max(as.integer(years))) else NA_character_
+  vers <- config$xsd$versions[[ty]]
+  v <- if (!is.null(vers) && length(vers) > 0) vers[[length(vers)]] else fallback
+  list(tax_year = ty, version = v)
 }
 
 #' Intersection of forms_applicable across a list of nccs_name fields.

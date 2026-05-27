@@ -19,14 +19,16 @@
 #'   (already-downloaded XML).
 #' @param dict A dictionary data.frame; see `load_dictionary()`.
 #' @param version XSD version string to resolve XPath claims for.
-#'   Phase 0 uses a single version per tax year; later phases will
-#'   detect this per filing.
+#'   If `NULL` (the default at scale), the version is parsed from the
+#'   row's `return_version` column (e.g. `"2024v5.1"` -> `"5.1"`). An
+#'   explicit value is still accepted for single-version test slices.
 #'
 #' @return A one-row data.frame with key columns + one column per
 #'   `nccs_name` + `_extract_error` (character, `NA` on success).
 #' @export
-extract_filing <- function(row, dict, version) {
+extract_filing <- function(row, dict, version = NULL) {
   row <- as.list(row)
+  resolved_version <- version %||% parse_return_version(row$return_version)$version
   fields <- dict$nccs_name
   out_skeleton <- function(err = NA_character_) {
     vals <- stats::setNames(
@@ -64,7 +66,7 @@ extract_filing <- function(row, dict, version) {
   df[["_extract_error"]] <- NA_character_
   for (i in seq_len(nrow(dict))) {
     nm <- dict$nccs_name[[i]]
-    xp <- parse_xpath_claim(dict$xpath_claims[[i]], row$tax_year, version)
+    xp <- parse_xpath_claim(dict$xpath_claims[[i]], row$tax_year, resolved_version)
     if (is.na(xp)) next
     val <- tryCatch(
       eval_xpath_value(doc, xp, type = dict$data_type[[i]]),
@@ -108,6 +110,29 @@ s3_uri_to_https <- function(s3_key) {
   bucket <- substr(rest, 1, slash - 1)
   key <- substr(rest, slash + 1, nchar(rest))
   sprintf("https://%s.s3.amazonaws.com/%s", bucket, key)
+}
+
+#' Parse a GT-style `return_version` string into `{tax_year, version}`.
+#'
+#' GT carries e.g. `"2024v5.1"`, `"2023v5-0"`, `"2020v4.0"` -
+#' i.e. `{tax_year}v{version}` where the version itself uses either
+#' `"."` or `"-"` as the minor separator. The version literal must
+#' round-trip the dictionary's `xpath_claims` tuple keys, so do not
+#' normalize the separator.
+#'
+#' Returns `list(tax_year = NA, version = NA)` when input is missing
+#' or malformed; the caller treats that as "no matching xpath claim"
+#' and the row's value columns stay `NA` with no `_extract_error`.
+#' @noRd
+parse_return_version <- function(s) {
+  if (is.null(s) || length(s) == 0 || is.na(s) || !nzchar(s)) {
+    return(list(tax_year = NA_character_, version = NA_character_))
+  }
+  m <- regmatches(s, regexec("^(\\d{4})v(.+)$", s))[[1]]
+  if (length(m) != 3) {
+    return(list(tax_year = NA_character_, version = NA_character_))
+  }
+  list(tax_year = m[[2]], version = m[[3]])
 }
 
 #' Evaluate an XPath against an xml document and coerce to data_type.

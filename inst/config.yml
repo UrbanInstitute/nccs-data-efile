@@ -113,6 +113,12 @@ default:
     # Observed null rates: gov_grants 0.62 on 990; PRI 0.98 on 990PF.
     # Both fields are sparse - only a minority of filers report them.
     # Pin tighter once first full vintage runs (ADR 0001 open item #1).
+    #
+    # strict: enforce the configured thresholds (fail the build on
+    # breach). FALSE for the first vintage so v2026.05 *measures* the
+    # real distribution; flip to TRUE once thresholds are pinned from
+    # observed values in v2026.05's manifest.
+    strict: false
     sample_size_per_form_year: 1000
     fields:
       government_grants:

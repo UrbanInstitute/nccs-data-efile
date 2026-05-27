@@ -7,9 +7,10 @@
 # Arguments:
 #   profile      Config profile to overlay on default. Defaults to
 #                "default". On EC2, pass "production".
-#   xsd_version  XSD version label to resolve XPath claims for.
-#                Required - pin per vintage from the IRS XSD bundle
-#                that the verifier ran against.
+#   xsd_version  Optional. Forces a single XSD version for every
+#                filing. Omit at scale - extract_filing parses the
+#                version from each filing's return_version column.
+#                Kept for single-version test slices.
 #
 # Behavior:
 #   - Runs the full Phase 0 pipeline locally.
@@ -26,9 +27,6 @@ suppressPackageStartupMessages({
 args <- commandArgs(trailingOnly = TRUE)
 profile <- if (length(args) >= 1 && nzchar(args[[1]])) args[[1]] else NULL
 xsd_version <- if (length(args) >= 2 && nzchar(args[[2]])) args[[2]] else NULL
-if (is.null(xsd_version)) {
-  stop("xsd_version is required (positional arg 2)")
-}
 
 config <- load_config(profile = profile)
 dict   <- load_dictionary()
