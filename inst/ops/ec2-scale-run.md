@@ -125,7 +125,7 @@ Both must succeed before continuing.
 cd ~/nccs-data-efile
 
 # (a) Vendor NODC concordance to s3 - confirms write permission.
-Rscript -e 'suppressPackageStartupMessages(library(nccs.data.efile)); vendor_nodc_concordance()'
+Rscript -e 'suppressPackageStartupMessages(library(nccs.data.efile)); vendor_nodc()'
 
 # (b) Fetch all configured XSDs (skips aliased 2024 5.1/5.2 entries).
 Rscript inst/scripts/phase0_verify.R production
