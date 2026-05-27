@@ -8,7 +8,7 @@ run_phase0(
   config = load_config(),
   dict = load_dictionary(),
   vintage = NULL,
-  xsd_version,
+  xsd_version = NULL,
   out_dir = NULL,
   skip_xsd_verification = FALSE,
   index = NULL
@@ -21,8 +21,10 @@ run_phase0(
 
 \item{vintage}{Vintage string (\code{v2026.06}). Auto-derived if \code{NULL}.}
 
-\item{xsd_version}{XSD version label to resolve XPath claims for.
-Phase 0 uses one version per build.}
+\item{xsd_version}{Optional XSD version label override. When
+\code{NULL} (the default at scale), each filing's version is parsed
+from its \code{return_version} column in the index. Pass an explicit
+value only for single-version test slices.}
 
 \item{out_dir}{Output directory. Defaults to
 \code{file.path(config$output$local_dir, vintage)}.}

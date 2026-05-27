@@ -4,7 +4,7 @@
 \alias{extract_filing}
 \title{Extract a single 990 filing into a one-row data.frame}
 \usage{
-extract_filing(row, dict, version)
+extract_filing(row, dict, version = NULL)
 }
 \arguments{
 \item{row}{A single-row data.frame or named list. Must carry
@@ -14,8 +14,9 @@ either \code{s3_key} (anonymous S3 fetch via https) or \code{local_path}
 \item{dict}{A dictionary data.frame; see \code{load_dictionary()}.}
 
 \item{version}{XSD version string to resolve XPath claims for.
-Phase 0 uses a single version per tax year; later phases will
-detect this per filing.}
+If \code{NULL} (the default at scale), the version is parsed from the
+row's \code{return_version} column (e.g. \code{"2024v5.1"} -> \code{"5.1"}). An
+explicit value is still accepted for single-version test slices.}
 }
 \value{
 A one-row data.frame with key columns + one column per
