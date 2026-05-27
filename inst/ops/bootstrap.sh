@@ -86,10 +86,17 @@ Rscript -e 'if (!requireNamespace("renv", quietly = TRUE)) install.packages("ren
 Rscript -e 'renv::restore(prompt = FALSE)'
 
 # ---------------------------------------------------------------------------
+# Install the package itself into the renv library so that the entrypoint
+# scripts (`library(nccs.data.efile)`) work without pkgload.
+# ---------------------------------------------------------------------------
+log "installing nccs.data.efile into the renv library"
+R CMD INSTALL --no-multiarch --with-keep.source .
+
+# ---------------------------------------------------------------------------
 # Smoke check
 # ---------------------------------------------------------------------------
 log "smoke check: package loads"
-Rscript -e 'pkgload::load_all(quiet = TRUE); cat("nccs.data.efile loads OK\n")'
+Rscript -e 'suppressPackageStartupMessages(library(nccs.data.efile)); cat("nccs.data.efile loads OK\n")'
 
 log "bootstrap complete."
 log "next steps (see inst/ops/ec2-scale-run.md):"
