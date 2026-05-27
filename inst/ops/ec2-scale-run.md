@@ -15,63 +15,37 @@ fresh on each instance — no static keys, no instance IAM role.
 
 ## 1. Prerequisites at Urban
 
-Settle these before launching:
+Settle this before launching:
 
 - **AWS account.** `s3://nccsdata` must be reachable by your SSO
   profile `thiya`. Confirm locally: `aws s3 ls s3://nccsdata --profile thiya`
   works from your laptop.
-- **EC2 launch permission.** Your SSO role needs `ec2:RunInstances` and
-  `ec2:TerminateInstances` in `us-east-1`.
-- **Key pair.** Have an SSH key pair registered in `us-east-1`, or
-  create one in the launch flow.
-- **VPC / subnet.** The default VPC's default subnet in `us-east-1`
-  is fine.
+
+Urban's defaults handle the rest (launch permissions, VPC / subnet,
+browser-based instance access).
 
 ## 2. Instance specs
 
 | Setting | Value | Notes |
 |---|---|---|
 | Region | `us-east-1` | Same region as `gt990datalake-rawdata`; intra-region S3 transfer is free + fast |
-| Type | `c5.9xlarge` | 36 vCPU, 72 GB RAM, 10 Gbps network. Bandwidth-sufficient and ~half the cost of c5.18xlarge |
-| AMI | Ubuntu 22.04 LTS (`Canonical, Ubuntu, 22.04 LTS, amd64`) | R packages are cleanest on Debian-family |
-| EBS root | 100 GB gp3 | Holds GT index cache, XSD cache, parquet outputs before sync |
-| Public IP | yes | Needed for apt, CRAN, GitHub, AWS, IRS TEOS |
-| Security group | inbound 22 from your IP only; outbound: default (all) | |
-| IAM instance profile | **none** | We use SSO from the instance, not a role |
+| Type   | `c5.9xlarge` | 36 vCPU, 72 GB RAM, 10 Gbps network. Bandwidth-sufficient and ~half the cost of c5.18xlarge |
+| OS     | Linux | Bootstrap targets Ubuntu 22.04 LTS specifically (apt + CRAN repo + AWS CLI v2 installer); other Debian-family images should work with minimal adjustment |
 
 On-demand pricing in `us-east-1` (May 2026 levels, verify before
 launch): c5.9xlarge ≈ $1.53/hr. Run takes 1-2 hours. EBS + S3
 requests add cents. **Total cost per vintage: roughly $3-5.**
 
-## 3. Launch + SSH in
+## 3. Run the bootstrap
 
-```bash
-ssh -i ~/.ssh/<your-key>.pem ubuntu@<instance-public-dns>
-```
-
-Verify the box is what you expect:
-
-```bash
-lsb_release -d                            # Ubuntu 22.04
-uname -m                                  # x86_64
-df -h /                                   # plenty of space on / 
-```
-
-## 4. Run the bootstrap
+Open the instance terminal in the browser, then:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/UrbanInstitute/nccs-data-efile/main/inst/ops/bootstrap.sh \
     | bash 2>&1 | tee bootstrap.log
 ```
 
-Or, if you'd rather clone-first then run:
-
-```bash
-git clone https://github.com/UrbanInstitute/nccs-data-efile.git
-bash nccs-data-efile/inst/ops/bootstrap.sh 2>&1 | tee bootstrap.log
-```
-
-What it does (idempotent):
+What it does (idempotent — safe to re-run):
 
 1. Installs system deps: `git`, `unzip`, `jq`, `xmlstarlet`,
    `libxml2-dev`, `libcurl4-openssl-dev`, `libssl-dev`, font/image
@@ -80,14 +54,26 @@ What it does (idempotent):
    is too old for current `arrow` / `xml2`).
 3. Installs AWS CLI v2 (Ubuntu's apt `awscli` is v1, which has
    broken SSO).
-4. Clones `UrbanInstitute/nccs-data-efile` to `~/nccs-data-efile`.
+4. Clones `UrbanInstitute/nccs-data-efile` to `~/nccs-data-efile`
+   if absent; pulls latest if already present.
 5. `renv::restore()` against the lockfile.
-6. Smoke-checks that the package loads.
+6. `renv::install(".")` builds and installs the package into the
+   renv library.
+7. Smoke-checks that the package loads.
 
-Wall-clock: ~5-10 minutes, dominated by the `renv::restore()` step
-which compiles `arrow`, `xml2`, `furrr`, etc. from source.
+Wall-clock: ~5-10 minutes, dominated by `renv::restore()` compiling
+`arrow`, `xml2`, `furrr`, etc. from source.
 
-## 5. Configure AWS SSO (once per instance)
+When the bootstrap completes, change into the repo so every
+subsequent command runs from inside it:
+
+```bash
+cd ~/nccs-data-efile
+```
+
+All later sections assume this is your working directory.
+
+## 4. Configure AWS SSO (once per instance)
 
 ```bash
 aws configure sso
@@ -99,12 +85,11 @@ aws configure sso
 # Profile name: thiya
 ```
 
-The flow opens a device-code prompt. Since the instance has no
-browser, copy the URL + code it prints and complete the auth in
-your laptop browser.
+The flow opens a device-code prompt; complete the auth in your
+laptop browser.
 
-After config is written to `~/.aws/config`, refresh credentials any
-time the SSO session expires (typically 8-12 hours):
+Refresh credentials any time the SSO session expires (typically
+8-12 hours):
 
 ```bash
 aws sso login --profile thiya
@@ -119,18 +104,16 @@ aws s3 ls s3://nccsdata/processed/efile/ --profile thiya
 
 Both must succeed before continuing.
 
-## 6. Pre-run verification
+## 5. Pre-run verification
 
 ```bash
-cd ~/nccs-data-efile
-
 # (a) Vendor NODC concordance to s3 - confirms write permission.
 Rscript -e 'suppressPackageStartupMessages(library(nccs.data.efile)); vendor_nodc()'
 
 # (b) Fetch all configured XSDs (skips aliased 2024 5.1/5.2 entries).
 Rscript inst/scripts/phase0_verify.R production
 
-# (c) Confirm 32/32 cells pass.
+# (c) Confirm 80/80 checks pass.
 jq '.passed, .checks_run' out/phase0_verification_report.json
 # Expect: true, 80 (5 claims x 16 (year, version) cells)
 ```
@@ -144,7 +127,7 @@ without all three succeeding:
 | (b) HTTP error on TEOS URL | IRS rate-limited or down | Wait 5 min, retry |
 | (c) `passed: false` | Alias config not loaded correctly | Check `inst/config.yml` has the `version_aliases` block; re-run |
 
-## 7. Execute the scale run
+## 6. Execute the scale run
 
 ```bash
 nohup Rscript inst/scripts/run_phase0.R production \
@@ -152,10 +135,11 @@ nohup Rscript inst/scripts/run_phase0.R production \
 echo $! > run.pid
 ```
 
-Monitor in another shell:
+Monitor in another shell (or in the same one with `Ctrl-C` to stop
+tailing; the job keeps running):
 
 ```bash
-tail -f ~/nccs-data-efile/run-phase0-v2026.05.log
+tail -f run-phase0-v2026.05.log
 ```
 
 Phases you'll see in the log:
@@ -179,7 +163,7 @@ If the SSO session expires mid-run, the final `aws s3 sync` step
 fails. Refresh with `aws sso login --profile thiya` and re-run only
 the publish step (the parquets are already on disk in `out/`).
 
-## 8. Verify the vintage landed
+## 7. Verify the vintage landed
 
 ```bash
 aws s3 ls s3://nccsdata/processed/efile/phase0/v2026.05/ --profile thiya
@@ -194,18 +178,25 @@ aws s3 cp s3://nccsdata/processed/efile/phase0/v2026.05/_manifest.json - \
     '
 ```
 
-Sanity-check row counts against the GT index totals you scanned during
-preflight: `n_filings(990) + n_filings(990PF)` across 2020-2024 should
-equal `sum(.files[].row_count)`.
+Sanity-check row counts against the GT index totals: `n_filings(990)
++ n_filings(990PF)` across 2020-2024 should equal `sum(.files[].row_count)`.
 
-## 9. Held-out spot-check
+## 8. Held-out spot-check
 
 Per ADR 0002 acceptance criterion 5: sample 10 random filings per
-form from the published vintage, fetch the source XML again, extract
-the value via an independent path (`xmlstarlet`), compare to the
-parquet. See the separate spot-check script — task #8.
+form, fetch the source XML again, extract the value via an
+independent toolchain (`xmlstarlet`), compare to the parquet.
 
-## 10. Tear down
+```bash
+Rscript inst/scripts/spot_check_vintage.R \
+    s3://nccsdata/processed/efile/phase0/v2026.05/ 10 production
+```
+
+Expect `agreement: 20/20`. Anything less than 20/20 is a blocker —
+investigate before declaring the vintage shipped. The script writes
+a structured report to `out/_spot_check_report_v2026.05.json`.
+
+## 9. Tear down
 
 Once the vintage is verified in S3 *and* the spot-check passes:
 
@@ -215,11 +206,9 @@ aws ec2 terminate-instances --instance-ids <instance-id> \
     --region us-east-1 --profile thiya
 ```
 
-EBS goes with the instance (root volume `DeleteOnTermination=true`
-by default). S3 outputs are durable. SSO config will be regenerated
-next launch.
+S3 outputs are durable. SSO config will be regenerated next launch.
 
-## 11. Likely failure modes
+## 10. Likely failure modes
 
 - **`renv::restore()` fails on `arrow`.** The Arrow R package
   sometimes needs pre-built libarrow. Workaround:
@@ -237,9 +226,9 @@ next launch.
   expired session — refresh SSO and re-run the same `sync` command;
   it is idempotent on objects already uploaded.
 
-## 12. Reuse for subsequent vintages
+## 11. Reuse for subsequent vintages
 
-For v2026.06+, only steps 3, 5, 7, 8, 10 change (vintage label
-substitutes through). The bootstrap script and SSO config flow are
-unchanged. Once thresholds are pinned from v2026.05's manifest, flip
+For v2026.06+, only the vintage label changes through sections 6, 7,
+8, and 9. The bootstrap script and SSO config flow are unchanged.
+Once thresholds are pinned from v2026.05's manifest, flip
 `verification.strict` to `true` in `inst/config.yml`.
