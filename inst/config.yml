@@ -5,8 +5,25 @@
 
 default:
   parallelism:
+    # Governs the XML *parse* step only (CPU-bound). Network staging is
+    # handled separately by the ZIP-bulk path in `staging` below.
     workers: 4
     plan: multisession  # multisession | multicore
+
+  # XML staging. The GT lake publishes per-release-year ZIP bundles at
+  # EfileData/XmlZips/ whose entries are named {object_id}_public.xml -
+  # the same key as the index's object_id. We download one ZIP at a time
+  # (a checkpoint unit), unzip, keep only in-scope object_ids, parse, and
+  # delete - far faster than ~2M per-filing GETs. Any in-scope object_id
+  # absent from every ZIP is fetched individually with s5cmd (fallback).
+  staging:
+    mode: "zips"  # zips | objects
+    zip_prefix: "s3://gt990datalake-rawdata/EfileData/XmlZips/"
+    # ZIP filename year is the RELEASE year, not tax year; a tax year's
+    # filings scatter across release ZIPs. Pull releases >= this floor.
+    zip_release_year_floor: 2021
+    stage_dir: "/mnt/stage"  # ephemeral; instance-store NVMe if available
+    fallback_tool: "s5cmd"
 
   scope:
     forms: ["990", "990PF"]

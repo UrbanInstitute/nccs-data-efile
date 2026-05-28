@@ -67,6 +67,21 @@ if ! command -v aws >/dev/null 2>&1 || ! aws --version | grep -q 'aws-cli/2'; th
 fi
 
 # ---------------------------------------------------------------------------
+# s5cmd (coverage-gap fallback: fetches individual XMLs not present in any
+# ZIP bundle, far faster than aws s3 cp for many small objects).
+# ---------------------------------------------------------------------------
+if ! command -v s5cmd >/dev/null 2>&1; then
+    log "installing s5cmd"
+    tmpdir=$(mktemp -d)
+    curl -fsSL "https://github.com/peak/s5cmd/releases/latest/download/s5cmd_Linux-64bit.tar.gz" \
+        -o "${tmpdir}/s5cmd.tar.gz"
+    tar -xzf "${tmpdir}/s5cmd.tar.gz" -C "${tmpdir}" s5cmd
+    sudo install -m 0755 "${tmpdir}/s5cmd" /usr/local/bin/s5cmd
+    rm -rf "${tmpdir}"
+fi
+log "s5cmd: $(s5cmd version 2>&1 | head -1)"
+
+# ---------------------------------------------------------------------------
 # Repo
 # ---------------------------------------------------------------------------
 if [ ! -d "${REPO_DIR}/.git" ]; then
@@ -105,4 +120,6 @@ log "next steps (see inst/ops/ec2-scale-run.md):"
 log "  1. aws configure sso  # one-time per instance, profile name: thiya"
 log "  2. aws sso login --profile thiya"
 log "  3. Rscript inst/scripts/phase0_verify.R production"
-log "  4. nohup Rscript inst/scripts/run_phase0.R production > run.log 2>&1 &"
+log "  4. Rscript inst/scripts/timed_slice.R production   # go/no-go gate"
+log "  5. nohup bash inst/ops/log-sync.sh run-phase0.log & # stream log to S3"
+log "  6. nohup Rscript inst/scripts/run_phase0.R production > run-phase0.log 2>&1 &"

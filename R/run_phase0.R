@@ -66,33 +66,11 @@ run_phase0 <- function(config = load_config(),
   cli::cli_alert_info("index: {nrow(index)} filings in scope")
 
   setup_future_plan(config$parallelism)
-  n_workers <- future::nbrOfWorkers()
-  # Chunk the index outside the closure so it is passed to furrr as
-  # the *iteration argument* (chunked per worker) rather than captured
-  # as a closure global (broadcast in full to every worker). At
-  # 700k filings, the whole-index closure capture exceeds future's
-  # default 500 MiB global-broadcast guard. Oversubscribe by 4x to
-  # balance worker load when filing sizes vary.
-  chunk_size <- max(1L, ceiling(nrow(index) / (n_workers * 4L)))
-  chunk_id <- ceiling(seq_len(nrow(index)) / chunk_size)
-  index_chunks <- lapply(
-    split(seq_len(nrow(index)), chunk_id),
-    function(idxs) index[idxs, , drop = FALSE]
-  )
   cli::cli_alert_info(
-    "extracting in parallel ({n_workers} workers, {length(index_chunks)} chunks of ~{chunk_size} filings)"
+    "extracting ({future::nbrOfWorkers()} parse workers, staging mode '{config$staging$mode %||% \"objects\"}')"
   )
-  chunk_rows <- furrr::future_map(
-    index_chunks,
-    function(chunk_df) {
-      lapply(seq_len(nrow(chunk_df)), function(i) {
-        extract_filing(chunk_df[i, ], dict, version = xsd_version)
-      })
-    },
-    .options = furrr::furrr_options(seed = TRUE)
-  )
-  rows <- unlist(chunk_rows, recursive = FALSE)
-  extracted <- do.call(rbind, rows)
+  extracted <- extract_filings(index, dict, config, out_dir, xsd_version)
+  cli::cli_alert_info("extracted {nrow(extracted)} rows")
 
   # Distribution thresholds in config are calibrated from a 100-filing
   # dry-run; the first scale vintage's job is to *measure* the real
@@ -235,4 +213,250 @@ setup_future_plan <- function(parallelism) {
     sequential   = future::plan(future::sequential),
     stop(sprintf("unknown parallelism.plan: %s", plan_name))
   )
+}
+
+# ----------------------------------------------------------------------
+# Extraction staging. `staging.mode` selects how XML is obtained:
+#   - "zips":    bulk-download the GT lake's EfileData/XmlZips/ bundles,
+#                one ZIP at a time (a resumable checkpoint unit), unzip,
+#                keep only in-scope object_ids, parse, delete. Any
+#                in-scope object_id absent from every ZIP is fetched
+#                individually via s5cmd (coverage fallback).
+#   - "objects": legacy per-filing download (slow; for small local slices).
+# See ADR 0001 §9 and the EC2 runbook.
+# ----------------------------------------------------------------------
+
+#' Dispatch extraction by staging mode. Returns a base data.frame.
+#' @noRd
+extract_filings <- function(index, dict, config, out_dir, xsd_version) {
+  mode <- config$staging$mode %||% "objects"
+  switch(
+    mode,
+    zips    = extract_via_zips(index, dict, config, out_dir, xsd_version),
+    objects = as.data.frame(
+      data.table::rbindlist(
+        parse_rows_parallel(index, dict, xsd_version),
+        use.names = TRUE, fill = TRUE
+      )
+    ),
+    stop(sprintf("unknown staging.mode: %s", mode))
+  )
+}
+
+#' Parse a set of index rows in parallel, one filing per row.
+#' Splits into worker-sized groups (passed as the furrr iteration
+#' argument, not captured as a closure global) and calls
+#' `extract_filing` per row. Returns a list of one-row data.frames.
+#' @noRd
+parse_rows_parallel <- function(df, dict, xsd_version) {
+  if (nrow(df) == 0) return(list())
+  n_workers <- max(1L, future::nbrOfWorkers())
+  grp_size <- max(1L, ceiling(nrow(df) / (n_workers * 4L)))
+  grp <- ceiling(seq_len(nrow(df)) / grp_size)
+  groups <- lapply(
+    split(seq_len(nrow(df)), grp),
+    function(idx) df[idx, , drop = FALSE]
+  )
+  res <- furrr::future_map(
+    groups,
+    function(g) lapply(
+      seq_len(nrow(g)),
+      function(i) extract_filing(g[i, ], dict, version = xsd_version)
+    ),
+    .options = furrr::furrr_options(seed = TRUE)
+  )
+  unlist(res, recursive = FALSE)
+}
+
+#' ZIP-bulk extraction: the primary scale path. Each ZIP is one
+#' resumable checkpoint -> {out_dir}/_chunks/{zipname}.parquet.
+#' `run_fallback = FALSE` skips the per-object coverage fallback (used by
+#' timed_slice.R, where only a few ZIPs are processed and the full
+#' "missing" set is meaningless).
+#' @noRd
+extract_via_zips <- function(index, dict, config, out_dir, xsd_version,
+                             run_fallback = TRUE) {
+  staging <- config$staging
+  stage_dir <- staging$stage_dir %||% file.path(out_dir, "_stage")
+  chunk_dir <- file.path(out_dir, "_chunks")
+  dir.create(chunk_dir, recursive = TRUE, showWarnings = FALSE)
+
+  index$object_id <- as.character(index$object_id)
+  index <- index[!duplicated(index$object_id), , drop = FALSE]
+
+  zips <- list_target_zips(staging)
+  if (length(zips) == 0) stop("no target ZIPs found under ", staging$zip_prefix)
+  cli::cli_alert_info(
+    "staging via {length(zips)} ZIP bundle(s) from {staging$zip_prefix}"
+  )
+
+  found_ids <- character(0)
+  t0 <- Sys.time()
+  for (k in seq_along(zips)) {
+    z <- zips[[k]]
+    pq <- file.path(chunk_dir, sprintf("%s.parquet", basename(z)))
+    if (file.exists(pq)) {
+      ids <- arrow::read_parquet(pq)$filing_receipt_id
+      found_ids <- c(found_ids, as.character(ids))
+      cli::cli_alert_info(
+        "[zip {k}/{length(zips)}] {basename(z)} - skip (done, {length(ids)} rows)"
+      )
+      next
+    }
+    rows <- process_one_zip(z, index, dict, config, stage_dir, xsd_version)
+    if (length(rows) > 0) {
+      dt <- data.table::rbindlist(rows, use.names = TRUE, fill = TRUE)
+      write_chunk_parquet(dt, pq, config)
+      found_ids <- c(found_ids, as.character(dt$filing_receipt_id))
+      matched <- nrow(dt)
+    } else {
+      write_chunk_parquet(empty_extract_df(dict), pq, config)
+      matched <- 0L
+    }
+    elapsed <- as.numeric(difftime(Sys.time(), t0, units = "secs"))
+    eta <- if (k < length(zips)) round(elapsed / k * (length(zips) - k)) else 0
+    cli::cli_alert_info(
+      "[zip {k}/{length(zips)}] {basename(z)} - {matched} in-scope rows, {round(elapsed)}s elapsed, ETA {eta}s"
+    )
+  }
+
+  missing <- setdiff(index$object_id, unique(found_ids))
+  if (run_fallback && length(missing) > 0) extract_coverage_fallback(
+    index[index$object_id %in% missing, , drop = FALSE],
+    dict, config, stage_dir, chunk_dir, xsd_version
+  ) else if (length(missing) > 0) {
+    cli::cli_alert_info("{length(missing)} in-scope ids not in processed ZIPs (fallback skipped)")
+  }
+
+  unlink(stage_dir, recursive = TRUE, force = TRUE)
+  parts <- lapply(
+    list.files(chunk_dir, pattern = "\\.parquet$", full.names = TRUE),
+    arrow::read_parquet
+  )
+  parts <- parts[vapply(parts, nrow, integer(1)) > 0L]
+  if (length(parts) == 0) stop("no rows extracted from any ZIP")
+  as.data.frame(data.table::rbindlist(parts, use.names = TRUE, fill = TRUE))
+}
+
+#' Download one ZIP, unzip only its in-scope entries, parse them.
+#' Returns a list of one-row data.frames (empty list if none in scope).
+#' @noRd
+process_one_zip <- function(z, index, dict, config, stage_dir, xsd_version) {
+  reset_dir(stage_dir)
+  local_zip <- file.path(stage_dir, basename(z))
+  aws_s3_cp_anon(z, local_zip)
+
+  entries <- utils::unzip(local_zip, list = TRUE)$Name
+  entries <- entries[grepl("_public\\.xml$", entries)]
+  ids <- sub("_public\\.xml$", "", basename(entries))
+  keep <- ids %in% index$object_id
+  if (!any(keep)) {
+    unlink(local_zip)
+    return(list())
+  }
+  sel_entries <- entries[keep]
+  sel_ids <- ids[keep]
+  xdir <- file.path(stage_dir, "x")
+  utils::unzip(local_zip, files = sel_entries, exdir = xdir, junkpaths = TRUE)
+  unlink(local_zip)
+
+  sub <- index[match(sel_ids, index$object_id), , drop = FALSE]
+  sub$local_path <- file.path(xdir, paste0(sel_ids, "_public.xml"))
+  parse_rows_parallel(sub, dict, xsd_version)
+}
+
+#' Fetch in-scope filings missing from all ZIPs, individually via s5cmd,
+#' and write them to {chunk_dir}/_fallback.parquet (also resumable).
+#' @noRd
+extract_coverage_fallback <- function(df, dict, config, stage_dir,
+                                      chunk_dir, xsd_version) {
+  fb_pq <- file.path(chunk_dir, "_fallback.parquet")
+  if (file.exists(fb_pq)) {
+    cli::cli_alert_info("coverage fallback - skip (done)")
+    return(invisible())
+  }
+  tool <- config$staging$fallback_tool %||% "s5cmd"
+  cli::cli_alert_warning(
+    "{nrow(df)} in-scope filings absent from ZIPs; fetching individually via {tool}"
+  )
+  reset_dir(stage_dir)
+  xdir <- file.path(stage_dir, "fb")
+  dir.create(xdir, recursive = TRUE, showWarnings = FALSE)
+  local_paths <- file.path(xdir, paste0(df$object_id, "_public.xml"))
+  runfile <- file.path(stage_dir, "s5cmd.txt")
+  writeLines(sprintf("cp %s %s", df$s3_key, local_paths), runfile)
+  system2(tool, c("--no-sign-request", "run", runfile),
+          stdout = FALSE, stderr = FALSE)
+
+  df$local_path <- local_paths
+  got <- file.exists(df$local_path)
+  if (sum(!got) > 0) {
+    cli::cli_alert_warning("{sum(!got)} filings still unfetched after fallback")
+  }
+  rows <- parse_rows_parallel(df[got, , drop = FALSE], dict, xsd_version)
+  if (length(rows) > 0) {
+    dt <- data.table::rbindlist(rows, use.names = TRUE, fill = TRUE)
+    write_chunk_parquet(dt, fb_pq, config)
+  }
+  invisible()
+}
+
+#' List target ZIP s3 URIs, filtered to release years >= the floor.
+#' The release year is the last 19xx/20xx run in the filename (handles
+#' both `YYYY_TEOS_XML_*` and `download990xml_YYYY_N` naming schemes).
+#' @noRd
+list_target_zips <- function(staging) {
+  prefix <- staging$zip_prefix
+  floor_yr <- as.integer(staging$zip_release_year_floor %||% 0L)
+  out <- suppressWarnings(system2(
+    "aws", c("s3", "ls", "--no-sign-request", prefix),
+    stdout = TRUE, stderr = FALSE
+  ))
+  files <- sub(".*\\s", "", out)
+  files <- files[grepl("\\.zip$", files)]
+  yr <- vapply(files, extract_release_year, integer(1))
+  keep <- !is.na(yr) & yr >= floor_yr
+  uris <- paste0(prefix, files[keep])
+  max_zips <- staging$max_zips
+  if (!is.null(max_zips) && length(uris) > max_zips) uris <- utils::head(uris, max_zips)
+  uris
+}
+
+#' Last plausible 4-digit year (19xx/20xx) in a filename, or NA.
+#' @noRd
+extract_release_year <- function(fname) {
+  m <- regmatches(fname, gregexpr("(19|20)\\d{2}", fname))[[1]]
+  if (length(m) == 0) return(NA_integer_)
+  as.integer(m[[length(m)]])
+}
+
+#' Atomic parquet write: write to .tmp then rename, so a kill mid-write
+#' never leaves a half-written chunk that resume would trust.
+#' @noRd
+write_chunk_parquet <- function(df, path, config) {
+  tmp <- paste0(path, ".tmp")
+  arrow::write_parquet(
+    df, tmp, compression = config$parquet$compression %||% "zstd"
+  )
+  file.rename(tmp, path)
+}
+
+#' Zero-row data.frame with the columns `extract_filing` produces, used
+#' as the chunk parquet for a ZIP that holds no in-scope filings (so
+#' resume still skips it).
+#' @noRd
+empty_extract_df <- function(dict) {
+  cols <- c("filing_receipt_id", "ein", "tax_year", "form_type",
+            dict$nccs_name, "_extract_error")
+  df <- stats::setNames(
+    lapply(cols, function(.) character(0)), cols
+  )
+  as.data.frame(df, stringsAsFactors = FALSE, check.names = FALSE)
+}
+
+#' Wipe and recreate a directory (bounds staging disk to one ZIP).
+#' @noRd
+reset_dir <- function(d) {
+  unlink(d, recursive = TRUE, force = TRUE)
+  dir.create(d, recursive = TRUE, showWarnings = FALSE)
 }

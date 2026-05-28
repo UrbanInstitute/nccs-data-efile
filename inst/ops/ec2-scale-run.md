@@ -26,15 +26,30 @@ browser-based instance access).
 
 ## 2. Instance specs
 
+Staging changed in v2: instead of ~1.96M per-filing HTTP downloads, we
+bulk-download the GT lake's `EfileData/XmlZips/` bundles (one ZIP at a
+time, ~31 GB total compressed across ~97 files), unzip locally, and parse
+from disk. The bottleneck is therefore **XML parse CPU + local disk
+I/O**, not per-file network latency. Pick the vCPU count from the timed
+slice (§5b), not a guess.
+
 | Setting | Value | Notes |
 |---|---|---|
 | Region | `us-east-1` | Same region as `gt990datalake-rawdata`; intra-region S3 transfer is free + fast |
-| Type   | `c5.9xlarge` | 36 vCPU, 72 GB RAM, 10 Gbps network. Bandwidth-sufficient and ~half the cost of c5.18xlarge |
-| OS     | Linux | Bootstrap targets Ubuntu 22.04 LTS specifically (apt + CRAN repo + AWS CLI v2 installer); other Debian-family images should work with minimal adjustment |
+| Type   | `c5d.9xlarge` (or larger `c5d.*`) | The `d` variants have **instance-store NVMe** — ideal for the ephemeral `staging.stage_dir` (fast, free, dies with the instance, which is fine). On a plain `c5.*` you must point `stage_dir` at a gp3 EBS volume with raised IOPS, or unzip-to-disk will be I/O-bound. |
+| OS     | Linux | Bootstrap targets Ubuntu 22.04 LTS specifically; other Debian-family images should work with minimal adjustment |
 
-On-demand pricing in `us-east-1` (May 2026 levels, verify before
-launch): c5.9xlarge ≈ $1.53/hr. Run takes 1-2 hours. EBS + S3
-requests add cents. **Total cost per vintage: roughly $3-5.**
+If using a `c5d.*`, mount the NVMe and set `staging.stage_dir` to it
+(e.g. `/mnt/stage`) before the run:
+
+```bash
+sudo mkfs -t xfs /dev/nvme1n1 && sudo mkdir -p /mnt/stage \
+  && sudo mount /dev/nvme1n1 /mnt/stage && sudo chown ubuntu:ubuntu /mnt/stage
+```
+
+On-demand pricing in `us-east-1` (verify before launch): c5d.9xlarge
+≈ $1.73/hr. **Do not guess the run time — the timed slice (§5b) measures
+it.** EBS + S3 requests add cents.
 
 ## 3. Run the bootstrap
 
@@ -127,41 +142,70 @@ without all three succeeding:
 | (b) HTTP error on TEOS URL | IRS rate-limited or down | Wait 5 min, retry |
 | (c) `passed: false` | Alias config not loaded correctly | Check `inst/config.yml` has the `version_aliases` block; re-run |
 
-## 6. Execute the scale run
+### 5b. Timed-slice gate (DO NOT SKIP)
+
+Measure real throughput on **this** instance before committing to a
+multi-hour run. Processes a couple of ZIPs and projects the full-run
+time and cost.
 
 ```bash
+HOURLY_USD=1.73 SLICE_ZIPS=2 Rscript inst/scripts/timed_slice.R production
+```
+
+Read the `throughput` and both projection lines. Sanity-check:
+
+- If the projected full run is wildly longer than expected, stop and
+  reconsider instance size / `parallelism.workers` before burning hours.
+- A high `extract error rate` (> a few %) means many XMLs failed to
+  parse — investigate before the full run.
+
+This is also the first real read on the ZIP-coverage assumption (the
+fallback is disabled in the slice; full coverage is measured by §6).
+
+## 6. Execute the scale run
+
+Start the off-instance log streamer first, so the log survives even if
+the box becomes unreachable under load or is terminated blind:
+
+```bash
+nohup bash inst/ops/log-sync.sh run-phase0-v2026.06.log > log-sync.out 2>&1 &
+echo $! > log-sync.pid
+
 nohup Rscript inst/scripts/run_phase0.R production \
-    > run-phase0-v2026.05.log 2>&1 &
+    > run-phase0-v2026.06.log 2>&1 &
 echo $! > run.pid
 ```
 
-Monitor in another shell (or in the same one with `Ctrl-C` to stop
-tailing; the job keeps running):
+The log is mirrored every 60s to
+`s3://nccsdata/processed/efile/diagnostics/{instance-id}/`. Monitor
+locally with `tail -f run-phase0-v2026.06.log`, or from your laptop:
 
 ```bash
-tail -f run-phase0-v2026.05.log
+aws s3 cp s3://nccsdata/processed/efile/diagnostics/<instance-id>/run-phase0-v2026.06.log - --profile thiya | tail -40
 ```
 
 Phases you'll see in the log:
 
 1. XSD verification (~30s)
-2. GT index fetch — 5 yearly CSVs, ~1 min
-3. Extraction in parallel (`extracting in parallel (36 workers)`) —
-   the long pole. Expect ~1-1.5 hours for ~700k filings on
-   c5.9xlarge in-region.
-4. Distribution check (~10s; warns but does not fail because
-   `verification.strict: false` for v2026.05)
-5. Writing parquets + dictionary + quality (~30s)
-6. Manifest emission (~5s)
-7. `aws s3 sync` to vintage prefix (~1 min)
-8. `aws s3 sync --delete` to `.../latest/` (~30s)
+2. GT index fetch — yearly CSVs, ~1 min
+3. **ZIP-bulk extraction** — the long pole. One heartbeat line per ZIP:
+   `[zip k/N {name} - {matched} in-scope rows, {elapsed}s, ETA {n}s]`.
+   Completed ZIPs are checkpointed to `out/{vintage}/_chunks/`.
+4. Coverage fallback (if any in-scope ids were absent from all ZIPs):
+   `! N in-scope filings absent from ZIPs; fetching individually via s5cmd`
+5. Distribution check (~10s; warns, does not fail, while
+   `verification.strict: false`)
+6. Writing parquets + dictionary + quality, manifest, `aws s3 sync` to
+   the vintage prefix and `.../latest/`.
 
-Final log line on success:
-`published: s3://nccsdata/processed/efile/phase0/v2026.05/`
+Final log line on success: `published: s3://nccsdata/processed/efile/phase0/v{vintage}/`
 
-If the SSO session expires mid-run, the final `aws s3 sync` step
-fails. Refresh with `aws sso login --profile thiya` and re-run only
-the publish step (the parquets are already on disk in `out/`).
+**Resume after a kill/crash/SSO-expiry mid-run:** just re-launch the same
+`run_phase0.R` command. Completed-ZIP chunks in `_chunks/` are detected
+and skipped; only the remaining ZIPs are processed. If only the final
+`aws s3 sync` failed (e.g. SSO expired), refresh
+`aws sso login --profile thiya` and re-run — extraction is already
+checkpointed, so it fast-forwards to the publish step.
 
 ## 7. Verify the vintage landed
 
@@ -214,11 +258,16 @@ S3 outputs are durable. SSO config will be regenerated next launch.
   sometimes needs pre-built libarrow. Workaround:
   `Rscript -e 'arrow::install_arrow()'` before re-running
   `renv::restore()`, or set `ARROW_USE_PKG_CONFIG=false` in the env.
-- **HTTP 503 from GT bucket during extract.** S3 throttling at high
-  concurrency. The current code does not retry per-row. If error
-  rate is non-trivial in `_extract_error`, lower
-  `production.parallelism.workers` from 72 to 36 or 18 in
-  `inst/config.yml` and re-run.
+- **Disk fills during extract.** Staging unzips one ZIP at a time and
+  deletes it before the next, so peak use is ~one ZIP unzipped (~2 GB).
+  If `staging.stage_dir` points at a small root volume, set it to the
+  NVMe mount (`/mnt/stage`) or a larger EBS volume.
+- **ZIP coverage gap.** In-scope `object_id`s absent from every ZIP are
+  fetched individually by the s5cmd fallback (`_fallback.parquet`). A
+  large gap (logged count) means the `zip_release_year_floor` is too high
+  — lower it in `inst/config.yml` so more release-year ZIPs are pulled.
+- **s5cmd not found.** The fallback needs `s5cmd` on PATH (installed by
+  `bootstrap.sh`). Re-run the bootstrap if missing.
 - **Distribution check breaches in soft mode.** Expected on the
   first vintage; this is the calibration data. Read the warning,
   then pin tighter thresholds for v2026.06.

@@ -17,6 +17,7 @@ Depends:
 Imports:
     arrow,
     cli,
+    data.table,
     digest,
     furrr,
     future,
