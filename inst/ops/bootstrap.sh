@@ -70,16 +70,29 @@ fi
 # s5cmd (coverage-gap fallback: fetches individual XMLs not present in any
 # ZIP bundle, far faster than aws s3 cp for many small objects).
 # ---------------------------------------------------------------------------
-if ! command -v s5cmd >/dev/null 2>&1; then
-    log "installing s5cmd"
+# Release assets are version-stamped (no version-less "latest" alias), so
+# resolve the tag from the API and build the URL. Non-fatal: s5cmd is only
+# the coverage-gap fallback, so a download hiccup must not abort bootstrap.
+install_s5cmd() {
+    command -v s5cmd >/dev/null 2>&1 && return 0
+    local tmpdir ver
     tmpdir=$(mktemp -d)
-    curl -fsSL "https://github.com/peak/s5cmd/releases/latest/download/s5cmd_Linux-64bit.tar.gz" \
-        -o "${tmpdir}/s5cmd.tar.gz"
-    tar -xzf "${tmpdir}/s5cmd.tar.gz" -C "${tmpdir}" s5cmd
-    sudo install -m 0755 "${tmpdir}/s5cmd" /usr/local/bin/s5cmd
+    ver=$(curl -fsSL https://api.github.com/repos/peak/s5cmd/releases/latest \
+        | jq -r .tag_name 2>/dev/null)
+    ver="${ver#v}"
+    ver="${ver:-2.3.0}"
+    curl -fsSL "https://github.com/peak/s5cmd/releases/download/v${ver}/s5cmd_${ver}_Linux-64bit.tar.gz" \
+        -o "${tmpdir}/s5cmd.tar.gz" || { rm -rf "${tmpdir}"; return 1; }
+    tar -xzf "${tmpdir}/s5cmd.tar.gz" -C "${tmpdir}" s5cmd || { rm -rf "${tmpdir}"; return 1; }
+    sudo install -m 0755 "${tmpdir}/s5cmd" /usr/local/bin/s5cmd || { rm -rf "${tmpdir}"; return 1; }
     rm -rf "${tmpdir}"
+}
+log "installing s5cmd (coverage-gap fallback)"
+if install_s5cmd; then
+    log "s5cmd: $(s5cmd version 2>&1 | head -1)"
+else
+    log "WARNING: s5cmd install failed; coverage fallback will be unavailable"
 fi
-log "s5cmd: $(s5cmd version 2>&1 | head -1)"
 
 # ---------------------------------------------------------------------------
 # Repo
