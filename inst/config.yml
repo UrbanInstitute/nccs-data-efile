@@ -160,7 +160,12 @@ default:
 # Production overrides applied on EC2 c5.18xlarge.
 production:
   parallelism:
-    workers: 72
-    plan: multisession
+    # multicore (fork) vastly outperforms multisession (PSOCK) for this
+    # CPU-bound, local-file parse: parse_bench on a 72-vCPU box measured
+    # ~12x speedup for multicore vs ~0.1x (i.e. 16x SLOWER than one core)
+    # for multisession, whose per-task socket serialization dominates.
+    # Leave 2 vCPUs for the OS + terminal responsiveness.
+    workers: 70
+    plan: multicore
   output:
     s3_enabled: true

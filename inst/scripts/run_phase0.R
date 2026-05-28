@@ -20,9 +20,12 @@
 #   - Exits non-zero on any failure (XSD mismatch, distribution
 #     breach, S3 sync error).
 
-# Quiet the renv "project is out-of-sync" notice that each multisession
-# worker would otherwise print on startup (inherited by child processes).
+# Quiet the renv "project is out-of-sync" notice that each worker would
+# otherwise print on startup (inherited by child processes).
 Sys.setenv(RENV_CONFIG_SYNCHRONIZED_CHECK = "FALSE")
+# Allow fork-based multicore even under an RStudio-flavored session
+# (the parallelism plan; multicore is ~100x faster than multisession here).
+options(parallelly.fork.enable = TRUE)
 
 suppressPackageStartupMessages({
   library(nccs.data.efile)

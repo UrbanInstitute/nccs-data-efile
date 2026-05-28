@@ -15,9 +15,11 @@
 #   SLICE_ZIPS   number of ZIPs to process (default 2)
 #   HOURLY_USD   instance on-demand $/hr for the cost projection (default 1.53)
 
-# Quiet the renv "project is out-of-sync" notice that each multisession
-# worker would otherwise print on startup (inherited by child processes).
+# Quiet the renv "project is out-of-sync" notice that each worker would
+# otherwise print on startup (inherited by child processes).
 Sys.setenv(RENV_CONFIG_SYNCHRONIZED_CHECK = "FALSE")
+# Allow fork-based multicore even under an RStudio-flavored session.
+options(parallelly.fork.enable = TRUE)
 
 suppressPackageStartupMessages({
   library(nccs.data.efile)
