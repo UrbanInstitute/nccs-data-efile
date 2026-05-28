@@ -46,7 +46,7 @@ config$staging$stage_dir <- file.path(tempdir(), "slice_stage")
 out_dir <- file.path(tempdir(), sprintf("slice_%s", format(Sys.time(), "%H%M%S")))
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-setup_future_plan(config$parallelism)
+nccs.data.efile:::setup_future_plan(config$parallelism)
 n_workers <- future::nbrOfWorkers()
 
 t0 <- Sys.time()
