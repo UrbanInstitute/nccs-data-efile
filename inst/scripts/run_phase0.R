@@ -20,6 +20,10 @@
 #   - Exits non-zero on any failure (XSD mismatch, distribution
 #     breach, S3 sync error).
 
+# Quiet the renv "project is out-of-sync" notice that each multisession
+# worker would otherwise print on startup (inherited by child processes).
+Sys.setenv(RENV_CONFIG_SYNCHRONIZED_CHECK = "FALSE")
+
 suppressPackageStartupMessages({
   library(nccs.data.efile)
 })

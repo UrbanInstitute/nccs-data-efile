@@ -338,7 +338,9 @@ extract_via_zips <- function(index, dict, config, out_dir, xsd_version,
   as.data.frame(data.table::rbindlist(parts, use.names = TRUE, fill = TRUE))
 }
 
-#' Download one ZIP, unzip only its in-scope entries, parse them.
+#' Download one ZIP, extract it, parse its in-scope entries.
+#' Uses the system `unzip` binary rather than `utils::unzip`, which
+#' fails with error -103 on the GT lake's Zip64/large archives.
 #' Returns a list of one-row data.frames (empty list if none in scope).
 #' @noRd
 process_one_zip <- function(z, index, dict, config, stage_dir, xsd_version) {
@@ -346,22 +348,25 @@ process_one_zip <- function(z, index, dict, config, stage_dir, xsd_version) {
   local_zip <- file.path(stage_dir, basename(z))
   aws_s3_cp_anon(z, local_zip)
 
-  entries <- utils::unzip(local_zip, list = TRUE)$Name
-  entries <- entries[grepl("_public\\.xml$", entries)]
-  ids <- sub("_public\\.xml$", "", basename(entries))
-  keep <- ids %in% index$object_id
-  if (!any(keep)) {
-    unlink(local_zip)
-    return(list())
-  }
-  sel_entries <- entries[keep]
-  sel_ids <- ids[keep]
   xdir <- file.path(stage_dir, "x")
-  utils::unzip(local_zip, files = sel_entries, exdir = xdir, junkpaths = TRUE)
+  dir.create(xdir, recursive = TRUE, showWarnings = FALSE)
+  # -j flatten paths, -o overwrite, -q quiet. system2 execs directly (no
+  # shell), so paths need no quoting. unzip exits 1 on warnings (e.g. a
+  # skipped entry) which is non-fatal; we validate by listing extracted
+  # files below.
+  system2("unzip", c("-j", "-o", "-q", local_zip, "-d", xdir),
+          stdout = FALSE, stderr = FALSE)
   unlink(local_zip)
 
+  files <- list.files(xdir, pattern = "_public\\.xml$")
+  if (length(files) == 0) return(list())
+  ids <- sub("_public\\.xml$", "", files)
+  keep <- ids %in% index$object_id
+  if (!any(keep)) return(list())
+
+  sel_ids <- ids[keep]
   sub <- index[match(sel_ids, index$object_id), , drop = FALSE]
-  sub$local_path <- file.path(xdir, paste0(sel_ids, "_public.xml"))
+  sub$local_path <- file.path(xdir, files[keep])
   parse_rows_parallel(sub, dict, xsd_version)
 }
 
