@@ -30,6 +30,13 @@ default:
     tax_years: [2020, 2021, 2022, 2023, 2024]
     index_filter: ~  # optional regex or explicit key list for local slices
 
+  extract:
+    # Skip pathologically large filings whose XML parses to a multi-GB
+    # DOM - they peg one worker for minutes and stall the whole batch
+    # (and risk OOM). Skipped filings are recorded with an _extract_error.
+    # Set to 0 to disable the cap.
+    max_file_mb: 50
+
   output:
     s3_enabled: false
     s3_prefix: "s3://nccsdata/processed/efile/"

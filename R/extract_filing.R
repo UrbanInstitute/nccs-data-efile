@@ -26,7 +26,7 @@
 #' @return A one-row data.frame with key columns + one column per
 #'   `nccs_name` + `_extract_error` (character, `NA` on success).
 #' @export
-extract_filing <- function(row, dict, version = NULL) {
+extract_filing <- function(row, dict, version = NULL, max_bytes = 50e6) {
   row <- as.list(row)
   resolved_version <- version %||% parse_return_version(row$return_version)$version
   fields <- dict$nccs_name
@@ -57,6 +57,18 @@ extract_filing <- function(row, dict, version = NULL) {
     return(out_skeleton(attr(xml_path, "error", exact = TRUE) %||% "obtain_xml failed"))
   }
   on.exit(if (isTRUE(attr(xml_path, "tempfile"))) unlink(xml_path), add = TRUE)
+
+  # Skip pathologically large filings (rare returns with tens of thousands
+  # of line items). Their XML parses to a multi-GB DOM that pegs one worker
+  # for minutes and stalls the whole batch behind it (and risks OOM when
+  # several land at once). Record the skip so they stay visible.
+  fsize <- file.size(xml_path)
+  if (!is.na(fsize) && max_bytes > 0 && fsize > max_bytes) {
+    return(out_skeleton(sprintf(
+      "file too large: %.0f MB (> %.0f MB cap), skipped",
+      fsize / 1e6, max_bytes / 1e6
+    )))
+  }
 
   doc <- tryCatch(xml2::read_xml(xml_path),
                   error = function(e) e)

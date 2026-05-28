@@ -248,7 +248,7 @@ extract_filings <- function(index, dict, config, out_dir, xsd_version) {
 #' argument, not captured as a closure global) and calls
 #' `extract_filing` per row. Returns a list of one-row data.frames.
 #' @noRd
-parse_rows_parallel <- function(df, dict, xsd_version) {
+parse_rows_parallel <- function(df, dict, xsd_version, max_bytes = 50e6) {
   if (nrow(df) == 0) return(list())
   n_workers <- max(1L, future::nbrOfWorkers())
   grp_size <- max(1L, ceiling(nrow(df) / (n_workers * 4L)))
@@ -261,11 +261,19 @@ parse_rows_parallel <- function(df, dict, xsd_version) {
     groups,
     function(g) lapply(
       seq_len(nrow(g)),
-      function(i) extract_filing(g[i, ], dict, version = xsd_version)
+      function(i) extract_filing(g[i, ], dict, version = xsd_version,
+                                 max_bytes = max_bytes)
     ),
     .options = furrr::furrr_options(seed = TRUE)
   )
   unlist(res, recursive = FALSE)
+}
+
+#' Per-filing size cap (bytes) from config; 0 disables. Default 50 MB.
+#' @noRd
+max_bytes_from_config <- function(config) {
+  mb <- config$extract$max_file_mb %||% 50
+  as.numeric(mb) * 1e6
 }
 
 #' ZIP-bulk extraction: the primary scale path. Each ZIP is one
@@ -372,7 +380,8 @@ process_one_zip <- function(z, index, dict, config, stage_dir, xsd_version) {
     sub <- index[match(sel_ids, index$object_id), , drop = FALSE]
     sub$local_path <- file.path(xdir, files[keep])
     t_pa <- system.time(
-      rows <- parse_rows_parallel(sub, dict, xsd_version)
+      rows <- parse_rows_parallel(sub, dict, xsd_version,
+                                  max_bytes = max_bytes_from_config(config))
     )[["elapsed"]]
   }
   cli::cli_alert_info(
@@ -409,7 +418,8 @@ extract_coverage_fallback <- function(df, dict, config, stage_dir,
   if (sum(!got) > 0) {
     cli::cli_alert_warning("{sum(!got)} filings still unfetched after fallback")
   }
-  rows <- parse_rows_parallel(df[got, , drop = FALSE], dict, xsd_version)
+  rows <- parse_rows_parallel(df[got, , drop = FALSE], dict, xsd_version,
+                              max_bytes = max_bytes_from_config(config))
   if (length(rows) > 0) {
     dt <- data.table::rbindlist(rows, use.names = TRUE, fill = TRUE)
     write_chunk_parquet(dt, fb_pq, config)
