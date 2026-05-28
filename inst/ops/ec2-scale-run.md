@@ -171,7 +171,9 @@ the box becomes unreachable under load or is terminated blind:
 nohup bash inst/ops/log-sync.sh run-phase0-v2026.06.log > log-sync.out 2>&1 &
 echo $! > log-sync.pid
 
-nohup Rscript inst/scripts/run_phase0.R production \
+# STAGE_DIR: where ZIPs are downloaded/unzipped (needs ~2 GB free). On a
+# c5d.* point it at the NVMe mount; on a plain c5.* use a root-EBS path.
+STAGE_DIR=/mnt/stage nohup Rscript inst/scripts/run_phase0.R production \
     > run-phase0-v2026.06.log 2>&1 &
 echo $! > run.pid
 ```

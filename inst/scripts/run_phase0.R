@@ -38,6 +38,12 @@ xsd_version <- if (length(args) >= 2 && nzchar(args[[2]])) args[[2]] else NULL
 config <- load_config(profile = profile)
 dict   <- load_dictionary()
 
+# Override the ephemeral staging dir without editing config (e.g. point at
+# instance-store NVMe, or at root EBS on a non-`d` instance type where the
+# default /mnt/stage does not exist). Needs ~2 GB free (one unzipped ZIP).
+stage_override <- Sys.getenv("STAGE_DIR", "")
+if (nzchar(stage_override)) config$staging$stage_dir <- stage_override
+
 summary <- run_phase0(
   config = config,
   dict = dict,
