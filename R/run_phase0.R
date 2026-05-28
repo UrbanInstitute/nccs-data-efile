@@ -346,7 +346,7 @@ extract_via_zips <- function(index, dict, config, out_dir, xsd_version,
 process_one_zip <- function(z, index, dict, config, stage_dir, xsd_version) {
   reset_dir(stage_dir)
   local_zip <- file.path(stage_dir, basename(z))
-  aws_s3_cp_anon(z, local_zip)
+  t_dl <- system.time(aws_s3_cp_anon(z, local_zip))[["elapsed"]]
 
   xdir <- file.path(stage_dir, "x")
   dir.create(xdir, recursive = TRUE, showWarnings = FALSE)
@@ -354,20 +354,31 @@ process_one_zip <- function(z, index, dict, config, stage_dir, xsd_version) {
   # shell), so paths need no quoting. unzip exits 1 on warnings (e.g. a
   # skipped entry) which is non-fatal; we validate by listing extracted
   # files below.
-  system2("unzip", c("-j", "-o", "-q", local_zip, "-d", xdir),
-          stdout = FALSE, stderr = FALSE)
+  t_uz <- system.time(
+    system2("unzip", c("-j", "-o", "-q", local_zip, "-d", xdir),
+            stdout = FALSE, stderr = FALSE)
+  )[["elapsed"]]
   unlink(local_zip)
 
   files <- list.files(xdir, pattern = "_public\\.xml$")
-  if (length(files) == 0) return(list())
   ids <- sub("_public\\.xml$", "", files)
   keep <- ids %in% index$object_id
-  if (!any(keep)) return(list())
-
-  sel_ids <- ids[keep]
-  sub <- index[match(sel_ids, index$object_id), , drop = FALSE]
-  sub$local_path <- file.path(xdir, files[keep])
-  parse_rows_parallel(sub, dict, xsd_version)
+  n_total <- length(files)
+  n_keep <- sum(keep)
+  rows <- list()
+  t_pa <- 0
+  if (n_keep > 0) {
+    sel_ids <- ids[keep]
+    sub <- index[match(sel_ids, index$object_id), , drop = FALSE]
+    sub$local_path <- file.path(xdir, files[keep])
+    t_pa <- system.time(
+      rows <- parse_rows_parallel(sub, dict, xsd_version)
+    )[["elapsed"]]
+  }
+  cli::cli_alert_info(
+    "  phases: download {round(t_dl)}s, unzip {round(t_uz)}s ({n_total} files), parse {round(t_pa)}s ({n_keep} in scope)"
+  )
+  rows
 }
 
 #' Fetch in-scope filings missing from all ZIPs, individually via s5cmd,

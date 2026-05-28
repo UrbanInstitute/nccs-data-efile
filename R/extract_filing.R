@@ -61,6 +61,10 @@ extract_filing <- function(row, dict, version = NULL) {
   doc <- tryCatch(xml2::read_xml(xml_path),
                   error = function(e) e)
   if (inherits(doc, "error")) return(out_skeleton(conditionMessage(doc)))
+  # Strip namespaces once per document. eval_xpath_value below assumes a
+  # namespace-free doc; doing it here avoids re-copying the whole tree on
+  # every XPath claim (the dominant per-filing cost at scale).
+  doc <- xml2::xml_ns_strip(doc)
 
   df <- out_skeleton()
   df[["_extract_error"]] <- NA_character_
@@ -139,13 +143,13 @@ parse_return_version <- function(s) {
 #' Returns a length-1 atomic, or NA if the node is missing.
 #' @noRd
 eval_xpath_value <- function(doc, xpath, type = "string") {
-  # The IRS e-file XML carries a default namespace. xml2 does not let
-  # XPath match a default namespace without binding it explicitly, so
-  # we strip namespaces from the document. This is acceptable here
-  # because Phase 0 XPaths are absolute and reference unique
-  # local-names; full layer-1 work will swap to namespace-aware XPath.
-  doc_local <- xml2::xml_ns_strip(doc)
-  node <- xml2::xml_find_first(doc_local, xpath)
+  # `doc` is expected to be namespace-stripped already (see
+  # extract_filing). The IRS e-file XML carries a default namespace that
+  # xml2 cannot match in XPath without an explicit binding; stripping is
+  # acceptable here because Phase 0 XPaths are absolute and reference
+  # unique local-names. Full layer-1 work will swap to namespace-aware
+  # XPath.
+  node <- xml2::xml_find_first(doc, xpath)
   if (inherits(node, "xml_missing")) return(NA)
   txt <- xml2::xml_text(node, trim = TRUE)
   if (!nzchar(txt)) return(NA)
