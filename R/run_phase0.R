@@ -65,12 +65,18 @@ run_phase0 <- function(config = load_config(),
   }
   cli::cli_alert_info("index: {nrow(index)} filings in scope")
 
+  # Fail fast if any in-scope (tax_year, version) lacks a resolving XPath claim
+  # for an output field. This is the gate that would have caught the v2026.05
+  # `5-0`-vs-`5.0` typo that silently nulled TY2022/2023 (ADR 0002 Outcome).
+  verify_claim_coverage(index, dict, config)
+
   setup_future_plan(config$parallelism)
   cli::cli_alert_info(
     "extracting ({future::nbrOfWorkers()} parse workers, staging mode '{config$staging$mode %||% \"objects\"}')"
   )
   extracted <- extract_filings(index, dict, config, out_dir, xsd_version)
   cli::cli_alert_info("extracted {nrow(extracted)} rows")
+  warn_empty_tax_years(extracted, dict, config)
 
   # Distribution thresholds in config are calibrated from a 100-filing
   # dry-run; the first scale vintage's job is to *measure* the real
@@ -226,6 +232,76 @@ setup_future_plan <- function(parallelism) {
 # See ADR 0001 §9 and the EC2 runbook.
 # ----------------------------------------------------------------------
 
+#' Pre-extract guard: assert every in-scope `(tax_year, version)` resolves to
+#' an XPath claim for each output field, using the same `(row$tax_year,
+#' parse_return_version(return_version)$version)` lookup the extractor uses.
+#' Stops the build (listing the affected cells and filing counts) if any cell
+#' is unresolved - the typo/coverage class of bug that otherwise nulls whole
+#' tax years invisibly. @noRd
+verify_claim_coverage <- function(index, dict, config) {
+  combos <- unique(index[, c("tax_year", "return_version", "form_type")])
+  misses <- list()
+  for (out in config$phase0_outputs) {
+    for (fld in out$fields) {
+      forms <- forms_for_fields(fld, dict)
+      claim_cell <- dict$xpath_claims[dict$nccs_name == fld]
+      if (length(claim_cell) != 1) {
+        misses[[length(misses) + 1]] <- data.frame(
+          field = fld, tax_year = NA_integer_, version = NA_character_,
+          n_filings = sum(index$form_type %in% forms),
+          reason = "no dictionary row", stringsAsFactors = FALSE)
+        next
+      }
+      sub <- combos[combos$form_type %in% forms, , drop = FALSE]
+      for (j in seq_len(nrow(sub))) {
+        ver <- parse_return_version(sub$return_version[[j]])$version
+        ty  <- sub$tax_year[[j]]
+        if (is.na(parse_xpath_claim(claim_cell[[1]], ty, ver))) {
+          misses[[length(misses) + 1]] <- data.frame(
+            field = fld, tax_year = ty, version = ver,
+            n_filings = sum(index$form_type %in% forms &
+                            index$tax_year == ty &
+                            index$return_version == sub$return_version[[j]]),
+            reason = "no xpath claim", stringsAsFactors = FALSE)
+        }
+      }
+    }
+  }
+  if (length(misses) > 0) {
+    m <- do.call(rbind, misses)
+    m <- m[order(-m$n_filings), , drop = FALSE]
+    tbl <- paste(utils::capture.output(print(m, row.names = FALSE)), collapse = "\n")
+    stop(sprintf(
+      paste0("claim coverage gap: %d (field, year, version) cell(s) unresolved; ",
+             "%s in-scope filings would extract as NA:\n%s"),
+      nrow(m), format(sum(m$n_filings), big.mark = ","), tbl), call. = FALSE)
+  }
+  cli::cli_alert_success(
+    "claim coverage: every in-scope (year, version) resolves to an XPath")
+}
+
+#' Post-extract sanity: warn loudly if any in-scope tax_year is ~entirely null
+#' for an output field. A resolving XPath that still yields nothing across a
+#' whole year signals schema drift the coverage guard cannot see. Non-fatal -
+#' some years may be legitimately sparse - but surfaced for review. @noRd
+warn_empty_tax_years <- function(extracted, dict, config, threshold = 0.999) {
+  for (out in config$phase0_outputs) {
+    for (fld in out$fields) {
+      if (!fld %in% names(extracted)) next
+      forms <- forms_for_fields(fld, dict)
+      sub <- extracted[extracted$form_type %in% forms, , drop = FALSE]
+      if (nrow(sub) == 0) next
+      rate <- tapply(sub[[fld]], sub$tax_year, function(v) mean(is.na(v)))
+      empty <- rate[!is.na(rate) & rate >= threshold]
+      for (ty in names(empty)) {
+        cli::cli_alert_danger(paste0(
+          "{fld}: tax_year {ty} is {round(100 * empty[[ty]], 1)}% null ",
+          "({sum(sub$tax_year == as.integer(ty))} filings) - possible extraction gap"))
+      }
+    }
+  }
+}
+
 #' Dispatch extraction by staging mode. Returns a base data.frame.
 #' @noRd
 extract_filings <- function(index, dict, config, out_dir, xsd_version) {
@@ -257,6 +333,11 @@ parse_rows_parallel <- function(df, dict, xsd_version, max_bytes = 50e6) {
     split(seq_len(nrow(df)), grp),
     function(idx) df[idx, , drop = FALSE]
   )
+  # scheduling = Inf dispatches each group as its own future, picked up
+  # dynamically as workers free up. Without it, furrr statically partitions the
+  # groups across workers up front, so a worker dealt a slow group (one holding
+  # an unusually large filing) stalls the whole batch while others idle - the
+  # straggler tail that made the static run ~7h. Dynamic dispatch rebalances it.
   res <- furrr::future_map(
     groups,
     function(g) lapply(
@@ -264,7 +345,7 @@ parse_rows_parallel <- function(df, dict, xsd_version, max_bytes = 50e6) {
       function(i) extract_filing(g[i, ], dict, version = xsd_version,
                                  max_bytes = max_bytes)
     ),
-    .options = furrr::furrr_options(seed = TRUE)
+    .options = furrr::furrr_options(seed = TRUE, scheduling = Inf)
   )
   unlist(res, recursive = FALSE)
 }
