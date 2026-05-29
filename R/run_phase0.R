@@ -351,7 +351,21 @@ extract_via_zips <- function(index, dict, config, out_dir, xsd_version,
   )
   parts <- parts[vapply(parts, nrow, integer(1)) > 0L]
   if (length(parts) == 0) stop("no rows extracted from any ZIP")
-  as.data.frame(data.table::rbindlist(parts, use.names = TRUE, fill = TRUE))
+  combined <- data.table::rbindlist(parts, use.names = TRUE, fill = TRUE)
+
+  # A filing's object_id can appear in more than one release-year ZIP, so the
+  # same filing_receipt_id is parsed once per ZIP it lands in. Those copies come
+  # from the same source XML and are value-identical, so collapse to one row per
+  # filing. (The index is deduped by object_id upstream; this dedups the
+  # *extracted* rows, which the per-ZIP chunk concatenation does not.)
+  n_before <- nrow(combined)
+  combined <- unique(combined, by = "filing_receipt_id")
+  if (nrow(combined) < n_before) {
+    cli::cli_alert_info(
+      "deduped {n_before - nrow(combined)} cross-ZIP duplicate rows -> {nrow(combined)} unique filings"
+    )
+  }
+  as.data.frame(combined)
 }
 
 #' Download one ZIP, extract it, parse its in-scope entries.
