@@ -300,5 +300,80 @@ These get pinned during execution:
 
 ## Outcome
 
-To be populated after Phase D ships. Subsections: **Shipped**,
-**Diverged or deferred**, **Held-out validation results**.
+### Shipped
+
+First Phase 0 vintage `v2026.05` published 2026-05-29 to
+`s3://nccsdata/processed/efile/phase0/v2026.05/` with a `latest/`
+mirror (producer git SHA `0a7048d`). Both parquets, their dictionary
+and quality companions, and `_manifest.json` present (acceptance
+criterion 1). Forms 990 + 990-PF, tax years 2020-2024. NODC pinned at
+SHA `49f62af015ad56c4857273eff633166ba6c1a4da`, mirrored to
+`processed/efile/concordance/`. `nccs-contracts/decisions/0017`
+reconciled to Executed and `contracts/efile.yml` populated from the
+published artifact (acceptance criterion 6).
+
+### Gate 5 — IRS instruction spot-check (ADR 0017 §2.3), 2026-05-29
+
+Completed and signed off. Both layer-2 dictionary rows now carry
+verified `irs_instruction_citation` values (the prior "(CONFIRM
+PAGE)" placeholders are removed), cross-referenced against the actual
+IRS instructions:
+
+- **`government_grants`** — Form 990 Part VIII (Statement of Revenue)
+  line 1e, "Government grants (contributions)". 2024 Instructions for
+  Form 990, p. 39. Part/line stable across TY2020-2024. The
+  instruction text confirms the NODC semantic: contributions in the
+  form of grants/similar payments from local/state/federal/foreign
+  government sources, *received* by the filer — distinct from line 2
+  program-service revenue and from Schedule I grants paid *to*
+  governments.
+- **`program_related_investments_total`** — Form 990-PF "Summary of
+  Program-Related Investments", aggregate (sum of lines 1-3). 2024
+  Instructions for Form 990-PF, p. 31. **Form-renumbering caught
+  here:** this section is **Part VIII-B for TY2021-2024** but **Part
+  IX-B for TY2020** (the IRS renumbered Form 990-PF after the 2020
+  revision; the NODC `PF_09_` variable name is 2020-anchored). The
+  prior citation's flat "Part IX-B" was wrong for four of the five
+  in-scope years. The version-agnostic XPath
+  (`SumOfProgramRelatedInvstGrp/TotalAmt`) resolves across all years
+  regardless, so the data was unaffected by the citation error — only
+  the human-facing reference was stale.
+
+### Diverged or deferred — 2022/2023 version-string null bug
+
+A defect was found in v2026.05 while finalizing gate 5 and fixed in
+the same dictionary change:
+
+- **Symptom:** `government_grants` and `program_related_investments_total`
+  are 100% null for tax years **2022 and 2023** in the published
+  v2026.05 (2020/2021/2024 have normal ~0.60-0.73 null rates).
+- **Cause:** the layer-2 `xpath_claims` tuples for 2022/2023 used
+  hyphenated version strings (`2022:4-0`, `2023:5-1`, …). At extraction
+  `resolve_xpath` matches the GT index `return_version` parsed by
+  `parse_return_version`, which yields the dotted IRS form
+  (`2022v4.0` → `4.0`). Hyphen ≠ dot, so no tuple matched for those
+  years and every value fell through to `NA`. The hyphenated form
+  came from the IRS XSD *folder* naming (which is why the manifest's
+  `xsd_verification` block, driven off the XSD side, shows hyphens for
+  2022/2023 and dots elsewhere) — the two sides used different
+  conventions and only the extraction side mattered for the value.
+- **Fix:** version strings for 2022/2023 normalized to dots to match
+  `parse_return_version` output; a `2023:6.0` tuple was added. The
+  XSD-verification side that legitimately uses hyphenated folder names
+  is unaffected.
+- **Consequence:** v2026.05 must be rebuilt and republished; it is
+  materially incomplete for 2022-2023 (~1.27M filings across both
+  fields returned spurious nulls). Tracked in `contracts/efile.yml`
+  Open items.
+
+This is also why the published manifest's sampled `value_distribution`
+null rates (gov_grants 0.797, PRI 0.767) ran high and PRI tripped its
+null-rate floor: two of five years were entirely null.
+
+### Held-out validation results
+
+Acceptance criterion 5 (independent `xmlstarlet` re-extraction of 10
+filings per form, ADR 0017) was run via `spot_check_vintage()` at
+publish but, given the 2022/2023 null defect above, did not exercise
+those years' resolution path. Re-run against the rebuilt vintage and
+record agreement counts here.
