@@ -277,7 +277,9 @@ max_bytes_from_config <- function(config) {
 }
 
 #' ZIP-bulk extraction: the primary scale path. Each ZIP is one
-#' resumable checkpoint -> {out_dir}/_chunks/{zipname}.parquet.
+#' resumable checkpoint -> {checkpoint_dir}/{zipname}.parquet, where
+#' checkpoint_dir defaults to a `_checkpoints/<vintage>/` sibling of out_dir
+#' (NOT under it) so build scratch never crosses the publish boundary.
 #' `run_fallback = FALSE` skips the per-object coverage fallback (used by
 #' timed_slice.R, where only a few ZIPs are processed and the full
 #' "missing" set is meaningless).
@@ -286,7 +288,13 @@ extract_via_zips <- function(index, dict, config, out_dir, xsd_version,
                              run_fallback = TRUE) {
   staging <- config$staging
   stage_dir <- staging$stage_dir %||% file.path(out_dir, "_stage")
-  chunk_dir <- file.path(out_dir, "_chunks")
+  # Checkpoints are build-internal resume state, NOT deliverables. They MUST
+  # live outside out_dir: the publish step syncs the whole out_dir, so anything
+  # under it crosses the publish boundary. Placing them in a sibling
+  # `_checkpoints/<vintage>/` makes that leak structurally impossible rather
+  # than relying on a --exclude denylist that future scratch could slip past.
+  chunk_dir <- staging$checkpoint_dir %||%
+    file.path(dirname(out_dir), "_checkpoints", basename(out_dir))
   dir.create(chunk_dir, recursive = TRUE, showWarnings = FALSE)
 
   index$object_id <- as.character(index$object_id)
