@@ -4,14 +4,22 @@
 \alias{emit_quality}
 \title{Emit a per-output quality.json}
 \usage{
-emit_quality(output_name, df, out_dir)
+emit_quality(output_name, df, out_dir, extract_errors = NULL)
 }
 \arguments{
 \item{output_name}{Base name for the emitted file.}
 
-\item{df}{The data.frame being summarized.}
+\item{df}{The data.frame being summarized (the published shape; the
+\verb{_extract_error} column is dropped before publish, so the error
+counts come from \code{extract_errors}, not \code{df}).}
 
 \item{out_dir}{Directory to write into.}
+
+\item{extract_errors}{Optional character vector of \verb{_extract_error}
+values for the in-scope filings (one per row, \code{NA} on success).
+Supplied by the caller because the column is stripped from the
+published \code{df}. When \code{NULL}, falls back to a \verb{_extract_error}
+column on \code{df} if present (for standalone/test use).}
 }
 \value{
 Invisibly, the path to the written file.
@@ -28,6 +36,8 @@ Contents:
 \item \code{per_year_counts}       named list keyed by tax_year (if present)
 \item \code{numeric_summary}       per numeric column: min/max/p50/p99
 \item \code{extract_error_count}   filings that failed extraction
-(\verb{_extract_error} non-NA), if present
+(\verb{_extract_error} non-NA), if known
+\item \code{size_capped_count}     subset of the above skipped for
+exceeding \code{extract.max_file_mb}
 }
 }
