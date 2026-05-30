@@ -22,6 +22,10 @@
 #'   If `NULL` (the default at scale), the version is parsed from the
 #'   row's `return_version` column (e.g. `"2024v5.1"` -> `"5.1"`). An
 #'   explicit value is still accepted for single-version test slices.
+#' @param max_bytes Size cap in bytes for the unzipped filing XML.
+#'   Filings larger than this are skipped (recorded via
+#'   `_extract_error`) rather than parsed, since their multi-GB DOM
+#'   pegs a worker and risks OOM. `0` disables the cap. Default 50 MB.
 #'
 #' @return A one-row data.frame with key columns + one column per
 #'   `nccs_name` + `_extract_error` (character, `NA` on success).

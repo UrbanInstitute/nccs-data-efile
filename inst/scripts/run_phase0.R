@@ -44,6 +44,13 @@ dict   <- load_dictionary()
 stage_override <- Sys.getenv("STAGE_DIR", "")
 if (nzchar(stage_override)) config$staging$stage_dir <- stage_override
 
+# Resumable checkpoints live outside out_dir by design (so they are never
+# published). Override the location to place them on a volume with room to
+# persist across runs; the default is a `_checkpoints/<vintage>/` sibling of
+# out_dir.
+checkpoint_override <- Sys.getenv("CHECKPOINT_DIR", "")
+if (nzchar(checkpoint_override)) config$staging$checkpoint_dir <- checkpoint_override
+
 summary <- run_phase0(
   config = config,
   dict = dict,
@@ -59,6 +66,10 @@ if (isTRUE(config$output$s3_enabled)) {
   latest_uri  <- sprintf("%s%s/latest/", s3_prefix,
                          config$output$phase %||% "phase0")
 
+  # Syncing the whole out_dir is safe by construction: it contains only
+  # deliverables. Build scratch lives elsewhere - _stage is unlinked at the end
+  # of extraction, and _checkpoints is a sibling outside out_dir - so there is
+  # no --exclude denylist here to drift out of sync with the code.
   args <- c("s3", "sync", summary$out_dir, vintage_uri)
   if (!is.null(config$aws$profile)) args <- c(args, "--profile", config$aws$profile)
   status <- system2("aws", args)

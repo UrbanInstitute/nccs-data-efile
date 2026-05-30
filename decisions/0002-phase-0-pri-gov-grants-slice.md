@@ -300,5 +300,108 @@ These get pinned during execution:
 
 ## Outcome
 
-To be populated after Phase D ships. Subsections: **Shipped**,
-**Diverged or deferred**, **Held-out validation results**.
+### Shipped
+
+First Phase 0 vintage `v2026.05` published to
+`s3://nccsdata/processed/efile/phase0/v2026.05/` with a `latest/`
+mirror. An initial publish (producer git SHA `0a7048d`, 2026-05-29)
+carried the 2022/2023 null defect documented below; it was corrected
+by a full re-extract and **republished 2026-05-29 17:07 ET (producer
+git SHA `a9c32e5`, manifest `build_timestamp_utc`
+2026-05-29T21:07:21Z)**, which is the accepted artifact. Both parquets
+(GG 1,412,695 rows; PRI 526,807), their dictionary and quality
+companions, and `_manifest.json` present, no scratch `_chunks/` leak
+(acceptance criterion 1). Forms 990 + 990-PF, tax years 2020-2024.
+NODC pinned at SHA `49f62af015ad56c4857273eff633166ba6c1a4da`,
+mirrored to `processed/efile/concordance/`.
+`nccs-contracts/decisions/0017` reconciled to Executed and
+`contracts/efile.yml` populated from the published artifact
+(acceptance criterion 6).
+
+### Gate 5 — IRS instruction spot-check (ADR 0017 §2.3), 2026-05-29
+
+Completed and signed off. Both layer-2 dictionary rows now carry
+verified `irs_instruction_citation` values (the prior "(CONFIRM
+PAGE)" placeholders are removed), cross-referenced against the actual
+IRS instructions:
+
+- **`government_grants`** — Form 990 Part VIII (Statement of Revenue)
+  line 1e, "Government grants (contributions)". 2024 Instructions for
+  Form 990, p. 39. Part/line stable across TY2020-2024. The
+  instruction text confirms the NODC semantic: contributions in the
+  form of grants/similar payments from local/state/federal/foreign
+  government sources, *received* by the filer — distinct from line 2
+  program-service revenue and from Schedule I grants paid *to*
+  governments.
+- **`program_related_investments_total`** — Form 990-PF "Summary of
+  Program-Related Investments", aggregate (sum of lines 1-3). 2024
+  Instructions for Form 990-PF, p. 31. **Form-renumbering caught
+  here:** this section is **Part VIII-B for TY2021-2024** but **Part
+  IX-B for TY2020** (the IRS renumbered Form 990-PF after the 2020
+  revision; the NODC `PF_09_` variable name is 2020-anchored). The
+  prior citation's flat "Part IX-B" was wrong for four of the five
+  in-scope years. The version-agnostic XPath
+  (`SumOfProgramRelatedInvstGrp/TotalAmt`) resolves across all years
+  regardless, so the data was unaffected by the citation error — only
+  the human-facing reference was stale.
+
+### Diverged or deferred — 2022/2023 version-string null bug
+
+A defect was found in the initial v2026.05 publish (SHA `0a7048d`)
+while finalizing gate 5, fixed in the dictionary, and cleared by the
+re-extract republished as SHA `a9c32e5` (see **Shipped** and
+**Held-out validation** for the post-fix evidence):
+
+- **Symptom:** `government_grants` and `program_related_investments_total`
+  were 100% null for tax years **2022 and 2023** in the initial
+  publish (2020/2021/2024 had normal ~0.60-0.73 null rates).
+- **Cause:** the layer-2 `xpath_claims` tuples for 2022/2023 used
+  hyphenated version strings (`2022:4-0`, `2023:5-1`, …). At extraction
+  `resolve_xpath` matches the GT index `return_version` parsed by
+  `parse_return_version`, which yields the dotted IRS form
+  (`2022v4.0` → `4.0`). Hyphen ≠ dot, so no tuple matched for those
+  years and every value fell through to `NA`. The hyphenated form
+  came from the IRS XSD *folder* naming (which is why the manifest's
+  `xsd_verification` block, driven off the XSD side, shows hyphens for
+  2022/2023 and dots elsewhere) — the two sides used different
+  conventions and only the extraction side mattered for the value.
+- **Fix:** version strings for 2022/2023 normalized to dots to match
+  `parse_return_version` output; a `2023:6.0` tuple was added. The
+  XSD-verification side that legitimately uses hyphenated folder names
+  is unaffected.
+- **Consequence (resolved):** the initial publish was materially
+  incomplete for 2022-2023 (~1.27M filings across both fields returned
+  spurious nulls). v2026.05 was re-extracted in full and republished
+  (SHA `a9c32e5`, 2026-05-29 17:07 ET). Post-fix per-year null rates in
+  the published parquets are normal — GG: 2020=.60, 2021=.60, 2022=.66,
+  2023=.68, 2024=.73; PRI ~.62 across all years — and the rebuilt
+  manifest's sampled `value_distribution` null rates fell to GG 0.661 /
+  PRI 0.609 (vs. the buggy 0.797 / 0.767). A build-time guard,
+  `verify_claim_coverage()`, now hard-stops any future build whose
+  dictionary leaves an in-scope `(year, version)` unresolved (commit
+  `a9c32e5`), so this class of defect cannot ship silently again.
+
+The buggy manifest's sampled `value_distribution` null rates
+(gov_grants 0.797, PRI 0.767) ran high — and PRI tripped its null-rate
+floor — precisely because two of five years were entirely null.
+
+### Held-out validation results
+
+Acceptance criterion 5 (independent `xmlstarlet` re-extraction, ADR
+0017) was first run via `spot_check_vintage()` at the initial publish
+(20/20 agree) but, given the 2022/2023 null defect above, could not
+exercise those years' resolution path — every sampled 2022/2023 value
+was `NA` on both sides, so agreement was the trivial `NA == NA`.
+
+Against the rebuilt vintage (SHA `a9c32e5`), a held-out re-extraction
+was run that deliberately targets the previously-broken years:
+**12/12 agree.** Twelve real 2022/2023 filings (both forms) were
+sampled from the published parquets, their raw XML fetched from the GT
+lake (`EfileData/XmlFiles/<object_id>_public.xml`), and the value
+re-extracted with `xmlstarlet` independently of the producer's
+extractor; all twelve matched the parquet exactly. The sample
+exercises every version key that was broken: `2022v5.0`, `2023v5.0`,
+`2023v5.1`, and `2023v6.0` (the tuple that had been missing entirely),
+across both Form 990 (`GovernmentGrantsAmt`) and Form 990-PF
+(`SumOfProgramRelatedInvstGrp/TotalAmt`). Criterion 5 is satisfied for
+the corrected vintage.
