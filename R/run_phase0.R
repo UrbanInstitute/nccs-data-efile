@@ -237,7 +237,8 @@ setup_future_plan <- function(parallelism) {
 #' parse_return_version(return_version)$version)` lookup the extractor uses.
 #' Stops the build (listing the affected cells and filing counts) if any cell
 #' is unresolved - the typo/coverage class of bug that otherwise nulls whole
-#' tax years invisibly. @noRd
+#' tax years invisibly.
+#' @noRd
 verify_claim_coverage <- function(index, dict, config) {
   combos <- unique(index[, c("tax_year", "return_version", "form_type")])
   misses <- list()
@@ -283,7 +284,8 @@ verify_claim_coverage <- function(index, dict, config) {
 #' Post-extract sanity: warn loudly if any in-scope tax_year is ~entirely null
 #' for an output field. A resolving XPath that still yields nothing across a
 #' whole year signals schema drift the coverage guard cannot see. Non-fatal -
-#' some years may be legitimately sparse - but surfaced for review. @noRd
+#' some years may be legitimately sparse - but surfaced for review.
+#' @noRd
 warn_empty_tax_years <- function(extracted, dict, config, threshold = 0.999) {
   for (out in config$phase0_outputs) {
     for (fld in out$fields) {

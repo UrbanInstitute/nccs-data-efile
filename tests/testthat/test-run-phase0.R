@@ -32,6 +32,7 @@ test_that("run_phase0 produces parquet + dictionary + quality + manifest end-to-
     ein = "123456789",
     tax_year = 2024L,
     form_type = "990",
+    return_version = "2024v1.0",
     local_path = xmls,
     s3_key = NA_character_,
     stringsAsFactors = FALSE
@@ -45,7 +46,7 @@ test_that("run_phase0 produces parquet + dictionary + quality + manifest end-to-
     forms_applicable = "990",
     nodc_variable_name = "F9_GVT_GRT",
     irs_instruction_citation = "Form 990 line 1e",
-    xpath_claims = "2024:v1.0:/Return/ReturnData/IRS990/GovernmentGrantsAmt",
+    xpath_claims = "2024:1.0:/Return/ReturnData/IRS990/GovernmentGrantsAmt",
     notes = "",
     stringsAsFactors = FALSE
   )
@@ -67,12 +68,17 @@ test_that("run_phase0 produces parquet + dictionary + quality + manifest end-to-
       )
     ),
     output = list(phase = "phase0", local_dir = out_dir),
+    xsd = list(versions = list("2024" = "1.0")),
     vendored = list(nodc_concordance_sha = "deadbeef")
   )
 
+  # xsd_version = NULL mirrors production: extract_filing derives the
+  # per-row version from return_version via parse_return_version
+  # ("2024v1.0" -> "1.0"), matching the dotted dictionary claim and the
+  # coverage guard.
   summary <- run_phase0(
     config = cfg, dict = dict, vintage = "v2026.06",
-    xsd_version = "v1.0", out_dir = out_dir,
+    xsd_version = NULL, out_dir = out_dir,
     skip_xsd_verification = TRUE, index = index
   )
 

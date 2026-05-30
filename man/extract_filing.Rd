@@ -4,7 +4,7 @@
 \alias{extract_filing}
 \title{Extract a single 990 filing into a one-row data.frame}
 \usage{
-extract_filing(row, dict, version = NULL)
+extract_filing(row, dict, version = NULL, max_bytes = 5e+07)
 }
 \arguments{
 \item{row}{A single-row data.frame or named list. Must carry
@@ -17,6 +17,11 @@ either \code{s3_key} (anonymous S3 fetch via https) or \code{local_path}
 If \code{NULL} (the default at scale), the version is parsed from the
 row's \code{return_version} column (e.g. \code{"2024v5.1"} -> \code{"5.1"}). An
 explicit value is still accepted for single-version test slices.}
+
+\item{max_bytes}{Size cap in bytes for the unzipped filing XML.
+Filings larger than this are skipped (recorded via
+\verb{_extract_error}) rather than parsed, since their multi-GB DOM
+pegs a worker and risks OOM. \code{0} disables the cap. Default 50 MB.}
 }
 \value{
 A one-row data.frame with key columns + one column per
