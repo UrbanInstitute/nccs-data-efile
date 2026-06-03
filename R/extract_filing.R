@@ -77,10 +77,14 @@ extract_filing <- function(row, dict, version = NULL, max_bytes = 50e6) {
   doc <- tryCatch(xml2::read_xml(xml_path),
                   error = function(e) e)
   if (inherits(doc, "error")) return(out_skeleton(conditionMessage(doc)))
-  # Strip namespaces once per document. eval_xpath_value below assumes a
-  # namespace-free doc; doing it here avoids re-copying the whole tree on
-  # every XPath claim (the dominant per-filing cost at scale).
-  doc <- xml2::xml_ns_strip(doc)
+  # NB: we deliberately do NOT call xml2::xml_ns_strip() here. Stripping
+  # rewrites the whole DOM and falls off an O(n^2) cliff on large filings:
+  # a single 36 MB sub-cap return measured ~24 min in xml_ns_strip alone,
+  # vs ~0.3s for the entire namespace-aware extraction of the same file
+  # (see inst/scripts/profile_parse_cost.R). One such filing in a ZIP pegs
+  # a worker and stalls the whole bundle behind future_map's join.
+  # eval_xpath_value instead binds the IRS e-file namespace to a prefix and
+  # runs prefixed XPath against the raw tree - same node set, no tree copy.
 
   df <- out_skeleton()
   df[["_extract_error"]] <- NA_character_
@@ -155,17 +159,33 @@ parse_return_version <- function(s) {
   list(tax_year = m[[2]], version = m[[3]])
 }
 
+#' The IRS MeF e-file XML carries `http://www.irs.gov/efile` as the
+#' default namespace on every element. We bind it to an explicit prefix
+#' and run prefixed XPath instead of stripping namespaces; see the note
+#' in `extract_filing` for why `xml_ns_strip` is avoided.
+#' @noRd
+irs_efile_ns <- function() c(e = "http://www.irs.gov/efile")
+
+#' Prefix every step of an absolute, predicate-free element path so it
+#' matches a bound default namespace:
+#'   /Return/ReturnData/IRS990/Amt -> /e:Return/e:ReturnData/e:IRS990/e:Amt
+#' Phase 0 claims are all simple absolute paths (no `//`, `@attr`, or
+#' predicates). This is intentionally narrow; richer XPath claims in the
+#' dictionary would need a more careful rewrite.
+#' @noRd
+ns_qualify_xpath <- function(xpath, prefix = "e") {
+  gsub("/([A-Za-z_])", sprintf("/%s:\\1", prefix), xpath)
+}
+
 #' Evaluate an XPath against an xml document and coerce to data_type.
 #' Returns a length-1 atomic, or NA if the node is missing.
 #' @noRd
-eval_xpath_value <- function(doc, xpath, type = "string") {
-  # `doc` is expected to be namespace-stripped already (see
-  # extract_filing). The IRS e-file XML carries a default namespace that
-  # xml2 cannot match in XPath without an explicit binding; stripping is
-  # acceptable here because Phase 0 XPaths are absolute and reference
-  # unique local-names. Full layer-1 work will swap to namespace-aware
-  # XPath.
-  node <- xml2::xml_find_first(doc, xpath)
+eval_xpath_value <- function(doc, xpath, type = "string", ns = irs_efile_ns()) {
+  # `doc` is the raw parsed filing (NOT namespace-stripped). The IRS e-file
+  # default namespace is bound to prefix `e` and the absolute XPath is
+  # prefixed to match, which returns the same node without the costly
+  # whole-tree rewrite that xml_ns_strip performs (see extract_filing).
+  node <- xml2::xml_find_first(doc, ns_qualify_xpath(xpath, names(ns)[[1]]), ns = ns)
   if (inherits(node, "xml_missing")) return(NA)
   txt <- xml2::xml_text(node, trim = TRUE)
   if (!nzchar(txt)) return(NA)

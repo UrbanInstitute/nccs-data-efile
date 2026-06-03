@@ -97,12 +97,15 @@ build_irs_index <- function(xml_paths, tax_year) {
 }
 
 #' Pull EIN, form type, tax period, and DLN/return-id from a 990 XML
-#' header. Namespace-stripped for the same reason as extract_filing.
+#' header. Uses namespace-aware XPath (not xml_ns_strip) for the same
+#' reason as extract_filing - stripping cliffs to minutes on large
+#' filings; see inst/scripts/profile_parse_cost.R.
 #' @noRd
 read_irs_xml_header <- function(path) {
-  doc <- xml2::xml_ns_strip(xml2::read_xml(path))
+  doc <- xml2::read_xml(path)
+  ns <- irs_efile_ns()
   pick <- function(xp) {
-    n <- xml2::xml_find_first(doc, xp)
+    n <- xml2::xml_find_first(doc, ns_qualify_xpath(xp, names(ns)[[1]]), ns = ns)
     if (inherits(n, "xml_missing")) NA_character_ else xml2::xml_text(n, trim = TRUE)
   }
   list(
