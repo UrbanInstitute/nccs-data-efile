@@ -34,3 +34,27 @@ test_that("emit_quality counts extract errors when column present", {
   payload <- jsonlite::read_json(path)
   expect_equal(payload$extract_error_count, 1)
 })
+
+test_that("emit_quality counts errors from extract_errors arg (published-shape df)", {
+  # The published df has NO _extract_error column (it is dropped before
+  # publish); the caller passes the error vector explicitly. This is the
+  # path that exercises the real producer, where reading the column would
+  # always yield an empty count.
+  df <- data.frame(
+    ein = c("1", "2", "3"),
+    tax_year = 2024L,
+    government_grants = c(100, NA, NA),
+    stringsAsFactors = FALSE
+  )
+  errs <- c(NA, "file too large: 253 MB (> 50 MB cap), skipped", "parse error")
+  out_dir <- tempfile()
+  on.exit(unlink(out_dir, recursive = TRUE), add = TRUE)
+
+  path <- emit_quality("government_grants", df, out_dir = out_dir,
+                       extract_errors = errs)
+  payload <- jsonlite::read_json(path)
+  expect_equal(payload$extract_error_count, 2)
+  expect_equal(payload$size_capped_count, 1)
+  # extract_errors must NOT leak into the column stats.
+  expect_null(payload$null_rate_per_column$`_extract_error`)
+})

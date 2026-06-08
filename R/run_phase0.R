@@ -148,6 +148,15 @@ write_phase0_output <- function(out_spec, extracted, dict, config,
     rep(TRUE, nrow(extracted))
   }
   df <- extracted[rows, cols, drop = FALSE]
+  # Capture the per-filing extract errors for the in-scope rows BEFORE the
+  # `_extract_error` column is dropped (it is not in `cols`, so it never
+  # reaches the parquet). Without this the quality file's error counts are
+  # always empty - the skipped/oversized filings would be invisible.
+  err_vec <- if ("_extract_error" %in% names(extracted)) {
+    extracted[rows, "_extract_error", drop = TRUE]
+  } else {
+    NULL
+  }
 
   parquet_path <- file.path(out_dir, sprintf("%s.parquet", out_spec$name))
   arrow::write_parquet(
@@ -172,7 +181,7 @@ write_phase0_output <- function(out_spec, extracted, dict, config,
     nodc_concordance_sha = config$vendored$nodc_concordance_sha %||% NA_character_,
     out_dir = out_dir
   )
-  emit_quality(out_spec$name, df, out_dir = out_dir)
+  emit_quality(out_spec$name, df, out_dir = out_dir, extract_errors = err_vec)
   parquet_path
 }
 
