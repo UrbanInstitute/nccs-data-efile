@@ -133,16 +133,25 @@ default:
         expected_type: "USAmountType"
 
   verification:
-    # Thresholds widened after 2026-05-22 dry-run (100 filings, 2024v5.0).
-    # Observed null rates: gov_grants 0.62 on 990; PRI 0.98 on 990PF.
-    # Both fields are sparse - only a minority of filers report them.
-    # Pin tighter once first full vintage runs (ADR 0001 open item #1).
+    # Thresholds PINNED from the published v2026.05 vintage (manifest
+    # build_timestamp 2026-05-29T21:07Z, producer SHA a9c32e5). The
+    # earlier bands came from a 2026-05-22 dry-run (100 filings) whose
+    # PRI estimate (0.98) was a small-sample artifact; the full vintage
+    # measured PRI 0.6178 and gov_grants 0.6417 over 526,807 / 1,412,695
+    # rows (source: each output's _quality.json null_rate_per_column,
+    # cross-checked vs manifest.value_distribution n=5000 samples:
+    # gov_grants 0.6612, PRI 0.6094). Bands below bracket the observed
+    # rate with ~+/-0.10 margin for sampling noise and year-mix drift
+    # (the 2024 share keeps growing and 2024 has the highest GG null
+    # rate ~0.73) while still catching the catastrophic failure class -
+    # e.g. the TY2022/2023 version-key bug that drove rates toward ~1.0.
     #
     # strict: enforce the configured thresholds (fail the build on
-    # breach). FALSE for the first vintage so v2026.05 *measures* the
-    # real distribution; flip to TRUE once thresholds are pinned from
-    # observed values in v2026.05's manifest.
-    strict: false
+    # breach). TRUE as of v2026.06: v2026.05 measured the real
+    # distribution, the bands are now pinned from it, so the gate
+    # enforces. (Only the distribution gate honors this flag; XSD
+    # verification is always strict - see run_phase0.R.)
+    strict: true
     sample_size_per_form_year: 1000
     fields:
       government_grants:
@@ -150,15 +159,15 @@ default:
         forms_applicable: ["990"]
         min: 0
         max: 1.0e+10
-        null_rate_min: 0.40
-        null_rate_max: 0.85
+        null_rate_min: 0.55
+        null_rate_max: 0.78
       program_related_investments_total:
         type: "double"
         forms_applicable: ["990PF"]
         min: 0
         max: 1.0e+10
-        null_rate_min: 0.90
-        null_rate_max: 1.00
+        null_rate_min: 0.50
+        null_rate_max: 0.72
 
   aws:
     profile: "thiya"
