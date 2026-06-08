@@ -77,6 +77,41 @@ test_that("extract_filing returns NA row + error on parse failure", {
   expect_false(is.na(out[["_extract_error"]]))
 })
 
+test_that("ns_qualify_xpath prefixes every element step", {
+  expect_equal(
+    nccs.data.efile:::ns_qualify_xpath(
+      "/Return/ReturnData/IRS990/GovernmentGrantsAmt", "e"),
+    "/e:Return/e:ReturnData/e:IRS990/e:GovernmentGrantsAmt"
+  )
+})
+
+test_that("extract_filing is namespace-aware (no xml_ns_strip) with extra namespaces present", {
+  # Real IRS e-file XML declares xsi alongside the default efile namespace.
+  # The extractor must resolve values via the bound default namespace, not
+  # by stripping. This is the regression guard for the v2026.06 fix.
+  tmp <- tempfile(fileext = ".xml")
+  writeLines(paste0(
+    '<?xml version="1.0"?>\n',
+    '<Return xmlns="http://www.irs.gov/efile" ',
+    'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" ',
+    'returnVersion="2024v5.1">\n',
+    '  <ReturnData><IRS990>',
+    '<GovernmentGrantsAmt>42000</GovernmentGrantsAmt>',
+    '</IRS990></ReturnData>\n</Return>'), tmp)
+  on.exit(unlink(tmp), add = TRUE)
+
+  dict <- data.frame(
+    nccs_name    = "government_grants",
+    data_type    = "double",
+    xpath_claims = "2024:v1.0:/Return/ReturnData/IRS990/GovernmentGrantsAmt",
+    stringsAsFactors = FALSE
+  )
+  row <- list(local_path = tmp, tax_year = 2024, form_type = "990")
+  out <- extract_filing(row, dict, version = "v1.0")
+  expect_equal(out$government_grants, 42000)
+  expect_true(is.na(out[["_extract_error"]]))
+})
+
 test_that("s3_uri_to_https builds a virtual-hosted URL", {
   expect_equal(
     nccs.data.efile:::s3_uri_to_https("s3://gt990datalake-rawdata/990xmls/123_public.xml"),
