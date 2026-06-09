@@ -405,3 +405,73 @@ exercises every version key that was broken: `2022v5.0`, `2023v5.0`,
 across both Form 990 (`GovernmentGrantsAmt`) and Form 990-PF
 (`SumOfProgramRelatedInvstGrp/TotalAmt`). Criterion 5 is satisfied for
 the corrected vintage.
+
+### v2026.06 — perf-only re-extract (accepted 2026-06-09)
+
+Second Phase 0 vintage `v2026.06` published to
+`s3://nccsdata/processed/efile/phase0/v2026.06/` with a `latest/`
+mirror (producer git SHA `22b131b`, manifest `build_timestamp_utc`
+2026-06-08T20:18:00Z). This vintage is the output of the parse-cost
+refactor (drop `xml_ns_strip` → namespace-aware XPath, commit
+`c3673ae`) plus enabling the strict distribution gate with thresholds
+pinned from v2026.05 (commit `649823d`). It is the first vintage built
+under `verification.strict: true`.
+
+**Behavior-preserving.** Row counts (GG 1,412,695; PRI 526,807) and
+per-column null rates (GG 0.6417; PRI 0.6178) are identical to
+v2026.05 to four decimals. A perf-only refactor that leaves the output
+distribution unchanged is the intended result — it confirms the
+namespace-aware XPath change did not alter extraction semantics, only
+cost.
+
+**Gates (acceptance criteria 1–4).** All seven files present in both
+`v2026.06/` and `latest/`. `xsd_verification.passed == true` (80
+checks; the `found:false` mismatches are the dead XPath variants — one
+variant per (field, year, version) resolves, which is the pass
+condition). Strict distribution gate passed: sampled null rates within
+the pinned bands (GG [0.55, 0.78], PRI [0.50, 0.72]). Per-year row
+counts non-zero for every (form, year) in scope. `extract_error_count`
+= `size_capped_count` = 4 (the >50 MB giants, skipped and recorded, not
+silently dropped).
+
+**Performance.** Wall-clock was noticeably shorter than v2026.05 —
+roughly ~5 hours faster on the same c5.18xlarge scale run — consistent
+with the parse-cost root cause (sub-cap straggler ZIPs whose
+`xml_ns_strip` step cliffed to ~24 min on the worst-case 36 MB file;
+see the v2026.06 parse-cost analysis). The exact end-to-end runtime
+was not captured before the instance was terminated; only the
+qualitative delta is on record.
+
+**Accepted threshold note (acceptance criterion 3 — written note).**
+The strict gate evaluates a *stratified sample* (≤1000 rows per
+year×form, ~5,000 per field; `verify_value_distribution.R:36`), not the
+population. The full-population `_quality.json` carries values outside
+the configured `[0, 1.0e10]` value band that the sample did not
+contain:
+
+- `government_grants` max = 13,197,193,142 (> configured `max: 1.0e10`)
+  and min = −5,653,277 (< configured `min: 0`).
+- `program_related_investments_total` min = −55,000 (< `min: 0`).
+
+These were investigated against source XML and **accepted as
+real-as-filed**, not extraction defects:
+
+- The GG max (object_id `202212739349300946`, EIN 98-0593375, TY2021)
+  and the recurring ~$9–12B GG filer (EIN 31-4379427, **Battelle
+  Memorial Institute**, which manages federal national labs) both
+  match their source `<GovernmentGrantsAmt>` exactly. The `1.0e10`
+  ceiling was set in v2026.05 without knowledge that Battelle-class
+  mega-grantees exist in the tail; the bound is too low, the data is
+  correct.
+- The negatives each pair with a negative `TotalContributionsAmt` on
+  the same return (the whole contributions section is negative —
+  consistent with prior-year grant clawbacks/refunds or restatements)
+  and match the source XML exactly (object_ids `202321309349301607`,
+  `202231369349305503`).
+
+Follow-up (not blocking acceptance): the distribution gate's min/max
+checks are order statistics and cannot be bounded by a sample. Compute
+min/max over the full population (keep null-rate on the sample, where a
+proportion is fine), and widen the GG `max` band to admit Battelle-class
+filers — otherwise the gate can pass or fail stochastically on whether
+a tail row lands in the sample. Tracked separately from this ADR.

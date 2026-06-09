@@ -93,3 +93,44 @@ test_that("verify_value_distribution errors in strict mode on breach", {
     "strict mode"
   )
 })
+
+test_that("a single population-tail row trips the max gate (no sampling)", {
+  cfg <- list(
+    verification = list(
+      # Deliberately tiny sample budget: under the old sample-based gate
+      # this would usually miss the one out-of-band row. The gate now
+      # reads the full population, so it must catch it deterministically.
+      sample_size_per_form_year = 1,
+      fields = list(
+        government_grants = list(
+          type = "double", min = 0, max = 1e10,
+          null_rate_min = 0, null_rate_max = 1
+        )
+      )
+    )
+  )
+  df <- make_extracted(500, gov_grants = c(1e11, rep(1e5, 499)))  # one $100B row
+  r <- verify_value_distribution(df, config = cfg, strict = FALSE)
+  expect_false(r$passed)
+  expect_true(any(vapply(r$breaches,
+    function(b) identical(b$reason, "max above configured ceiling"), logical(1))))
+  expect_equal(r$rows_evaluated, nrow(df))
+})
+
+test_that("per-field summary carries heavy-tail diagnostics", {
+  cfg <- list(
+    verification = list(
+      fields = list(
+        government_grants = list(
+          type = "double", min = 0, max = 1e12,
+          null_rate_min = 0, null_rate_max = 1
+        )
+      )
+    )
+  )
+  df <- make_extracted(500, gov_grants = c(1e11, rep(1e3, 499)))
+  r <- verify_value_distribution(df, config = cfg, strict = FALSE)
+  num <- r$per_field$government_grants$numeric
+  expect_true(all(c("p90", "p999", "top_1pct_mass_share", "n_negative") %in% names(num)))
+  expect_gt(num$top_1pct_mass_share, 0.5)  # the one giant dominates total mass
+})

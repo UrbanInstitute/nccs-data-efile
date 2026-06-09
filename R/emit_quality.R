@@ -7,7 +7,10 @@
 #'   - `row_count`             total rows
 #'   - `null_rate_per_column`  named list, one entry per column
 #'   - `per_year_counts`       named list keyed by tax_year (if present)
-#'   - `numeric_summary`       per numeric column: min/max/p50/p99
+#'   - `numeric_summary`       per numeric column: population order
+#'                             statistics (min/max/p50/p90/p99/p999),
+#'                             negative/zero counts, and tail-mass
+#'                             concentration (see `tail_diagnostics`)
 #'   - `extract_error_count`   filings that failed extraction
 #'                             (`_extract_error` non-NA), if known
 #'   - `size_capped_count`     subset of the above skipped for
@@ -41,16 +44,9 @@ emit_quality <- function(output_name, df, out_dir, extract_errors = NULL) {
 
   null_rate <- vapply(df, function(x) mean(is.na(x)), numeric(1))
   numeric_cols <- vapply(df, is.numeric, logical(1))
-  numeric_summary <- lapply(df[, numeric_cols, drop = FALSE], function(x) {
-    nn <- x[!is.na(x)]
-    if (length(nn) == 0) return(list(min = NA, max = NA, p50 = NA, p99 = NA))
-    list(
-      min = min(nn),
-      max = max(nn),
-      p50 = unname(stats::quantile(nn, 0.5)),
-      p99 = unname(stats::quantile(nn, 0.99))
-    )
-  })
+  # Population-wide order statistics + heavy-tail concentration (no
+  # sampling). See `tail_diagnostics`. Empty list for an all-null column.
+  numeric_summary <- lapply(df[, numeric_cols, drop = FALSE], tail_diagnostics)
 
   per_year <- if ("tax_year" %in% names(df)) {
     as.list(table(df$tax_year))

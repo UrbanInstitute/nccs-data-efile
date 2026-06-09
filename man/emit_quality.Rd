@@ -34,7 +34,10 @@ Contents:
 \item \code{row_count}             total rows
 \item \code{null_rate_per_column}  named list, one entry per column
 \item \code{per_year_counts}       named list keyed by tax_year (if present)
-\item \code{numeric_summary}       per numeric column: min/max/p50/p99
+\item \code{numeric_summary}       per numeric column: population order
+statistics (min/max/p50/p90/p99/p999),
+negative/zero counts, and tail-mass
+concentration (see \code{tail_diagnostics})
 \item \code{extract_error_count}   filings that failed extraction
 (\verb{_extract_error} non-NA), if known
 \item \code{size_capped_count}     subset of the above skipped for

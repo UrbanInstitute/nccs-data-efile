@@ -1,18 +1,23 @@
 #' Verify the extracted value distribution against configured thresholds
 #'
-#' Samples up to `sample_size` rows per `(tax_year, form_type)` from
-#' an extracted data.frame and checks per-field assertions defined in
-#' `config$verification$fields`:
+#' Checks per-field assertions defined in `config$verification$fields`
+#' over the FULL extracted population (one row per filing):
 #'
 #'   - `type`            character; coercion sanity (currently only
 #'                       "double" is enforced; others noop).
-#'   - `min`, `max`      numeric value bounds for non-null observations.
+#'   - `min`, `max`      numeric value bounds. These are order
+#'                       statistics, so they are evaluated over every
+#'                       row, not a sample - a sample cannot bound a
+#'                       max (ADR 0002 Outcome, v2026.06 threshold
+#'                       note: the GG max $13.2B / Battelle filing and
+#'                       the negative-contribution filings only appear
+#'                       at the population tail).
 #'   - `null_rate_min`,  acceptable null-rate window for the field.
 #'     `null_rate_max`
 #'
-#' See ADR 0001 section 6. Thresholds in `inst/config.yml` are
-#' placeholders until pinned against the first vintage's distribution
-#' (ADR open item #1).
+#' See ADR 0001 section 6. Each field's summary carries a heavy-tail
+#' diagnostics block (see `tail_diagnostics`) that is also written into
+#' the manifest's `value_distribution`.
 #'
 #' @param extracted Data.frame produced by extracting many filings -
 #'   one row per filing, with at minimum `tax_year`, `form_type`, and
@@ -21,8 +26,8 @@
 #' @param strict If `TRUE`, error on any breach.
 #'
 #' @return A list with `passed` (logical), `checks_run` (integer),
-#'   `breaches` (list of breach descriptions), and `per_field`
-#'   (named list of per-field summaries).
+#'   `breaches` (list of breach descriptions), `per_field` (named list
+#'   of per-field summaries), and `rows_evaluated` (population size).
 #' @export
 verify_value_distribution <- function(extracted,
                                       config = load_config(),
@@ -31,26 +36,26 @@ verify_value_distribution <- function(extracted,
   if (is.null(fields) || length(fields) == 0) {
     stop("config$verification$fields is empty - nothing to verify")
   }
-  sample_size <- config$verification$sample_size_per_form_year %||% 1000L
 
-  sample_df <- stratified_sample(extracted, sample_size)
   per_field <- list()
   breaches <- list()
 
   for (nm in names(fields)) {
-    if (!(nm %in% names(sample_df))) {
+    if (!(nm %in% names(extracted))) {
       breaches[[length(breaches) + 1]] <- list(
         field = nm, reason = "field missing from extracted data"
       )
       next
     }
     spec <- fields[[nm]]
+    # Scope to the forms the field applies to, over the full population
+    # - not a stratified sample. min/max breaches must see the tail.
     scoped_df <- if (!is.null(spec$forms_applicable) &&
                      length(spec$forms_applicable) > 0 &&
-                     "form_type" %in% names(sample_df)) {
-      sample_df[sample_df$form_type %in% spec$forms_applicable, , drop = FALSE]
+                     "form_type" %in% names(extracted)) {
+      extracted[extracted$form_type %in% spec$forms_applicable, , drop = FALSE]
     } else {
-      sample_df
+      extracted
     }
     summary <- summarize_field(scoped_df[[nm]], spec)
     summary$forms_applicable <- spec$forms_applicable
@@ -73,21 +78,8 @@ verify_value_distribution <- function(extracted,
     checks_run = length(fields),
     breaches = breaches,
     per_field = per_field,
-    sample_size_used = nrow(sample_df)
+    rows_evaluated = nrow(extracted)
   )
-}
-
-#' Stratified sample: up to `n` rows per (tax_year, form_type).
-#' @noRd
-stratified_sample <- function(df, n) {
-  if (!all(c("tax_year", "form_type") %in% names(df))) {
-    return(df)  # nothing to stratify by; caller gets the full frame
-  }
-  groups <- split(df, list(df$tax_year, df$form_type), drop = TRUE)
-  picked <- lapply(groups, function(g) {
-    if (nrow(g) <= n) g else g[sample(nrow(g), n), , drop = FALSE]
-  })
-  do.call(rbind, picked)
 }
 
 #' Per-field summary + breach list given a verification spec.
@@ -120,13 +112,7 @@ summarize_field <- function(vals, spec) {
 
   numeric_summary <- list()
   if (identical(spec$type, "double") && length(non_null) > 0) {
-    nn <- suppressWarnings(as.numeric(non_null))
-    numeric_summary <- list(
-      min = min(nn, na.rm = TRUE),
-      max = max(nn, na.rm = TRUE),
-      p50 = stats::quantile(nn, 0.5, na.rm = TRUE, names = FALSE),
-      p99 = stats::quantile(nn, 0.99, na.rm = TRUE, names = FALSE)
-    )
+    numeric_summary <- tail_diagnostics(non_null, spec$min, spec$max)
     if (!is.null(spec$min) && numeric_summary$min < spec$min) {
       breaches[[length(breaches) + 1]] <- list(
         field = NA, reason = "min below configured floor",
