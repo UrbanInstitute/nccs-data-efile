@@ -91,7 +91,7 @@ default:
       "2020": ["4.0", "4.1", "4.2"]
       "2021": ["4.0", "4.1", "4.2", "4.3"]
       "2022": ["4-0", "4-1", "5-0"]
-      "2023": ["4-0", "5-0", "5-1"]
+      "2023": ["4-0", "5-0", "5-1", "6.0"]
       "2024": ["5.0", "5.1", "5.2"]
     # XSD inheritance: 2024v5.1 and 2024v5.2 schemas are not on the
     # public TEOS page (they're only on the gated MeF developer
@@ -103,6 +103,10 @@ default:
     # invariance of the Phase 0 XPaths across 5.x is tested
     # separately by sampling filings; see Phase D validation log.
     version_aliases:
+      "2023":
+        "6.0":
+          xsd_from: "5-1"
+          reason: "TEOS does not publish 2023v6.0; inheriting 2023v5.1 XSDs pending SOI/MeF retrieval. Phase 0 XPaths empirically confirmed across 2023 versions (ADR 0002 Outcome, 12/12 held-out exercised 2023v6.0)."
       "2024":
         "5.1":
           xsd_from: "5.0"
