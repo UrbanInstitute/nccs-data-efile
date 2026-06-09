@@ -114,27 +114,11 @@ default:
         "5.2":
           xsd_from: "5.0"
           reason: "TEOS does not publish 2024v5.2; inheriting 2024v5.0 XSDs pending SOI/MeF retrieval."
-    # Phase 0 XPath claims to verify per (tax_year, version).
-    # Source: ADR 0002 §"Two fields" (NODC concordance.csv inspection,
-    # 2026-05-22). expected_type "USAmountType" matches IRS efileTypes.xsd.
-    # If a verification run reports a different actual_type (e.g.
-    # "BigUSAmountType" in a newer XSD version), update here.
-    phase0_claims:
-      - field: "government_grants"
-        xpath: "/Return/ReturnData/IRS990/Form990PartVIII/GovernmentGrants"
-        expected_type: "USAmountType"
-      - field: "government_grants"
-        xpath: "/Return/ReturnData/IRS990/GovernmentGrants"
-        expected_type: "USAmountType"
-      - field: "government_grants"
-        xpath: "/Return/ReturnData/IRS990/GovernmentGrantsAmt"
-        expected_type: "USAmountType"
-      - field: "program_related_investments_total"
-        xpath: "/Return/ReturnData/IRS990PF/SumOfProgramRelatedInvestments/Total"
-        expected_type: "USAmountType"
-      - field: "program_related_investments_total"
-        xpath: "/Return/ReturnData/IRS990PF/SumOfProgramRelatedInvstGrp/TotalAmt"
-        expected_type: "USAmountType"
+    # NOTE: the former `phase0_claims` list was retired in Phase 0.5.
+    # Schema verification is now driven by the dictionary's own
+    # `xpath_claims` checked against the mechanical Layer 1 XSD inventory
+    # (run_phase0_verification -> verify_dictionary_against_inventory),
+    # so there is no separate hand-maintained claim list to keep in sync.
 
   verification:
     # Thresholds PINNED from the published v2026.05 vintage (manifest

@@ -45,12 +45,19 @@ that nulled TY2022/2023 in v2026.05 (ADR 0002 Outcome).
 
 Claim statuses:
 \itemize{
-\item \code{ok}                     resolves to a leaf element.
+\item \code{ok}                     resolves to a leaf element of a
+data_type-consistent XSD type.
 \item \code{missing_xpath}          cell exists but the XPath is absent (HARD).
 \item \code{not_leaf}               XPath exists but is a container (HARD).
+\item \code{type_mismatch}          a numeric (\code{double}/\code{int}) field resolves
+to a non-numeric XSD type (HARD). This is
+the type-class check that replaced the
+retired per-field \code{phase0_claims}
+expected_type; non-numeric data_types are
+recorded but not enforced yet.
 \item \code{unverifiable_no_cell}   no inventory cell for that (year,
 version) - a gated schema with no public
-XSD (e.g. 2023v6.0). WARN, not a failure.
+XSD. WARN, not a failure.
 }
 
 Coverage is bounded by the inventory's root scope (currently

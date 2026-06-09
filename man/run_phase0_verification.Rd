@@ -2,52 +2,37 @@
 % Please edit documentation in R/run_phase0_verification.R
 \name{run_phase0_verification}
 \alias{run_phase0_verification}
-\title{Drive the XSD verifier across the Phase 0 XPath claims}
+\title{Verify the dictionary's XPath claims against the Layer 1 inventory}
 \usage{
 run_phase0_verification(
-  tax_years = NULL,
-  versions = NULL,
   config = load_config(),
-  strict = TRUE
+  strict = TRUE,
+  dict = load_dictionary(),
+  inventory = NULL
 )
 }
 \arguments{
-\item{tax_years}{Character/integer vector of tax years. Defaults to
-\code{config$scope$tax_years}.}
-
-\item{versions}{Named list mapping \code{as.character(tax_year)} to a
-character vector of versions to verify for that year. If \code{NULL},
-versions are discovered by listing subdirectories of the local
-XSD cache.}
-
 \item{config}{Loaded config list.}
 
-\item{strict}{If \code{TRUE}, error on any mismatch.}
+\item{strict}{If \code{TRUE}, error on any hard breach (missing XPath,
+non-leaf element, or numeric/type mismatch).}
+
+\item{dict}{Layer 2 dictionary (defaults to \code{load_dictionary()}).}
+
+\item{inventory}{Optional prebuilt Layer 1 inventory; built via
+\code{build_all_xsd_inventories()} when \code{NULL}.}
 }
 \value{
-A list with \code{passed} (logical), \code{checks_run} (integer),
-\code{mismatches} (list of failed-check results), and \code{results}
-(data.frame of every check, one row per
-(tax_year, version, claim)).
+A list with \code{passed}, \code{checks_run}, \code{mismatches} (the
+non-\code{ok} claims), \code{aliases} (version inheritances in scope), and
+\code{results} (the full per-claim data.frame).
 }
 \description{
-For every combination of (tax_year, version, claim) defined in
-config, runs \code{verify_xpath()} and aggregates the results into a
-structured report suitable for embedding in \verb{_manifest.json} under
-the \code{xsd_verification} key (ADR 0001 section 10).
-}
-\details{
-Pass policy: for each (field, tax_year, version), at least one
-declared XPath variant must resolve to the expected type. Variants
-that don't resolve are reported but not treated as failure - per
-ADR 0002 extractor design ("first non-null wins"), the dictionary
-carries multiple variants to cover schema evolution. Failing the
-build only when an entire field has no working variant for a given
-(year, version) matches the actual data-correctness invariant.
-
-Fails (errors) in \code{strict = TRUE} mode when any (field, year,
-version) cell has zero passing variants. In non-strict mode the
-caller is responsible for interpreting the returned \code{passed} flag.
-
-See ADR 0001 section 5.
+Phase 0.5 unified the schema gate: rather than walking the IRS XSDs
+per entry of a hand-maintained \code{config$xsd$phase0_claims} list, this
+builds the mechanical Layer 1 inventory once and verifies the
+dictionary's own \code{xpath_claims} against it (existence + leaf +
+numeric type-class) via \code{verify_dictionary_against_inventory()}. The
+return shape is preserved for \verb{_manifest.json}'s \code{xsd_verification}
+block (ADR 0001 section 10 / ADR 0014).
 }

@@ -50,10 +50,15 @@ run_phase0 <- function(config = load_config(),
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   cli::cli_h1("Phase 0 build {vintage} -> {out_dir}")
 
+  # Schema gate (Phase 0.5): build the Layer 1 XSD inventory once and verify
+  # the dictionary's own XPath claims against it (existence + leaf + numeric
+  # type-class). Replaces the former per-claim XSD re-walk driven by the
+  # retired config$xsd$phase0_claims list; returns the manifest's
+  # xsd_verification block.
   xsd_result <- if (skip_xsd_verification) {
     list(passed = TRUE, checks_run = 0L, mismatches = list(), skipped = TRUE)
   } else {
-    run_phase0_verification(config = config, strict = TRUE)
+    run_phase0_verification(config = config, dict = dict, strict = TRUE)
   }
 
   if (is.null(index)) {
@@ -69,17 +74,6 @@ run_phase0 <- function(config = load_config(),
   # for an output field. This is the gate that would have caught the v2026.05
   # `5-0`-vs-`5.0` typo that silently nulled TY2022/2023 (ADR 0002 Outcome).
   verify_claim_coverage(index, dict, config)
-
-  # Supply-side gate (Phase 0.5): assert the dictionary's own XPath claims
-  # resolve to leaf elements in the mechanical Layer 1 XSD inventory. Catches
-  # a typo'd/renamed claim against ground truth, not just against the index.
-  # Shares the XSD cache run_phase0_verification needs, so it rides the same
-  # skip flag.
-  if (!skip_xsd_verification) {
-    verify_dictionary_against_inventory(
-      dict, build_all_xsd_inventories(config), config = config, strict = TRUE
-    )
-  }
 
   setup_future_plan(config$parallelism)
   cli::cli_alert_info(

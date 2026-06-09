@@ -2,14 +2,14 @@
 % Please edit documentation in R/verify_xpath.R
 \name{verify_xpath}
 \alias{verify_xpath}
-\title{Verify an XPath claim against a cached IRS XSD}
+\title{Verify an XPath claim against the Layer 1 XSD inventory}
 \usage{
 verify_xpath(
   xpath,
   tax_year,
   version,
-  expected_type,
-  xsd_dir = NULL,
+  expected_type = NULL,
+  inventory = NULL,
   config = load_config()
 )
 }
@@ -18,32 +18,28 @@ verify_xpath(
 
 \item{tax_year}{Integer or character tax year.}
 
-\item{version}{XSD version string.}
+\item{version}{Version string (dotted or hyphenated; normalized).}
 
-\item{expected_type}{Local-name of the expected XSD type.}
+\item{expected_type}{Optional XSD type to compare \code{actual_type}
+against. When \code{NULL}, \code{matches_expected} is \code{NA}.}
 
-\item{xsd_dir}{Directory containing the unpacked XSDs for the
-\verb{(tax_year, version)} bundle. Defaults to
-\code{xsd_cache_path(tax_year, version, config)}.}
+\item{inventory}{Optional Layer 1 inventory data.frame (from
+\code{build_xsd_inventory()} / \code{build_all_xsd_inventories()}). When
+\code{NULL}, built for just this \verb{(tax_year, version)} cell.}
 
 \item{config}{Loaded config list.}
 }
 \value{
 A list with \code{found} (logical), \code{actual_type} (character or
-\code{NA}), \code{matches_expected} (logical), \code{path_to_element} (character
-or \code{NA}), \code{xpath}, \code{tax_year}, \code{version}, \code{expected_type}.
+\code{NA}), \code{is_leaf} (logical or \code{NA}), \code{matches_expected} (logical or
+\code{NA}), \code{xpath}, \code{tax_year}, \code{version}, \code{expected_type}.
 }
 \description{
-Walks an XSD directory for a given (tax_year, version) and resolves
-the element targeted by \code{xpath}. Returns a structured result
-indicating whether the element exists and whether its declared type
-matches \code{expected_type}.
-}
-\details{
-The walker is deliberately schema-aware but XPath-syntax-naive: it
-accepts simple absolute paths of the form \verb{/A/B/C} (no predicates,
-no axes, no wildcards). Phase 0 claims fit this shape; if a future
-phase needs predicates, extend \code{parse_xpath_steps()}.
-
-See ADR 0001 section 5.
+Looks up \code{xpath} in the mechanical Layer 1 inventory for the
+\verb{(tax_year, version)} cell and reports whether it resolves to a leaf
+element, plus its declared XSD type. As of Phase 0.5 this is a
+lookup against materialized ground truth (\code{build_xsd_inventory()}),
+not the former per-call XSD tree-walk - the inventory is built once
+and every verification reads it. Version strings are normalized
+(dotted vs the hyphenated IRS folder convention) before matching.
 }

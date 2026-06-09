@@ -21,13 +21,12 @@ Aggregation to dashboard grain is **not** done here; it stays in the downstream 
 
 `run_phase0()` (`R/run_phase0.R`) drives the build end-to-end; `inst/scripts/run_phase0.R` is the CLI entry point. The stages, each a gate that aborts the build on failure:
 
-1. **XSD verification** — `run_phase0_verification()` / `verify_xpath()` walk the mirrored IRS XSDs and assert each `phase0_claims` XPath resolves to an element of the expected type. Always strict.
+1. **Schema verification** — `run_phase0_verification()` builds the Layer 1 XSD inventory once and verifies the **dictionary's own** `xpath_claims` against it via `verify_dictionary_against_inventory()`: each claim must resolve to a *leaf* element whose XSD type is consistent with the field's `data_type` (numeric `double`/`int` → a numeric XSD type, hard). This replaced the former per-claim XSD re-walk driven by a hand-maintained `phase0_claims` list (retired in Phase 0.5). Always strict; produces the manifest's `xsd_verification` block. (`verify_xpath()` is the single-cell lookup primitive.) Behind `skip_xsd_verification` (needs the XSD cache).
 2. **Index fetch** — `fetch_gt_indices()` reads the GivingTuesday data lake's JSON filing indices.
 3. **Claim coverage** — `verify_claim_coverage()` (demand-side): every in-scope `(tax_year, version)` in the index must resolve to an XPath claim, or the build hard-stops.
-4. **Dictionary ↔ inventory** — `verify_dictionary_against_inventory()` (supply-side, Phase 0.5): every dictionary XPath claim must resolve to a leaf element in the mechanical Layer 1 XSD inventory. Behind `skip_xsd_verification` (shares the XSD cache).
-5. **Extract** — `extract_filings()` / `extract_filing()`: parallel (`furrr`) per-filing XML parse + XPath eval, via the ZIP-bulk staging path.
-6. **Value-distribution gate** — `verify_value_distribution()`: per ADR / producer PR #5, `min`/`max` are checked over the **full population** (order statistics can't be sampled), `null_rate` over a stratified sample, plus heavy-tail diagnostics (`tail_diagnostics()`). Strict per `config$verification$strict`.
-7. **Write + manifest** — `write_phase0_output()` emits parquet + `_dictionary.csv` + `_quality.json` per output; `emit_manifest()` writes `_manifest.json` (ADR 0014 shape, pins NODC SHA + XSD provenance).
+4. **Extract** — `extract_filings()` / `extract_filing()`: parallel (`furrr`) per-filing XML parse + XPath eval, via the ZIP-bulk staging path.
+5. **Value-distribution gate** — `verify_value_distribution()`: per ADR / producer PR #5, `min`/`max` are checked over the **full population** (order statistics can't be sampled), `null_rate` over a stratified sample, plus heavy-tail diagnostics (`tail_diagnostics()`). Strict per `config$verification$strict`.
+6. **Write + manifest** — `write_phase0_output()` emits parquet + `_dictionary.csv` + `_quality.json` per output; `emit_manifest()` writes `_manifest.json` (ADR 0014 shape, pins NODC SHA + XSD provenance).
 
 `run_phase0()` never publishes — `inst/scripts/run_phase0.R` does `aws s3 sync` after a clean build (gated by `config$output$s3_enabled`, true only in the `production` profile), so a failed gate never half-publishes.
 
