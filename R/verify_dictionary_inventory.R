@@ -17,12 +17,19 @@
 #' that nulled TY2022/2023 in v2026.05 (ADR 0002 Outcome).
 #'
 #' Claim statuses:
-#'   - `ok`                     resolves to a leaf element.
+#'   - `ok`                     resolves to a leaf element of a
+#'                              data_type-consistent XSD type.
 #'   - `missing_xpath`          cell exists but the XPath is absent (HARD).
 #'   - `not_leaf`               XPath exists but is a container (HARD).
+#'   - `type_mismatch`          a numeric (`double`/`int`) field resolves
+#'                              to a non-numeric XSD type (HARD). This is
+#'                              the type-class check that replaced the
+#'                              retired per-field `phase0_claims`
+#'                              expected_type; non-numeric data_types are
+#'                              recorded but not enforced yet.
 #'   - `unverifiable_no_cell`   no inventory cell for that (year,
 #'                              version) - a gated schema with no public
-#'                              XSD (e.g. 2023v6.0). WARN, not a failure.
+#'                              XSD. WARN, not a failure.
 #'
 #' Coverage is bounded by the inventory's root scope (currently
 #' 990 + 990PF + ReturnHeader): a dictionary claim on a form/schedule
@@ -62,6 +69,13 @@ verify_dictionary_against_inventory <- function(dict, inventory,
         xsd_type <- hit$xsd_type[[1]]
         status <- if (isTRUE(hit$is_leaf[[1]])) "ok" else "not_leaf"
         type_plausible <- xsd_type_plausible(dtypes[[cl$field]], xsd_type)
+        # A numeric field landing on a non-numeric XSD type is a hard
+        # failure - the mechanical type-class check that replaced the
+        # retired per-field phase0_claims expected_type. Non-numeric
+        # data_types return NA (not enforced yet).
+        if (identical(status, "ok") && isFALSE(type_plausible)) {
+          status <- "type_mismatch"
+        }
       }
     }
     data.frame(field = cl$field, tax_year = cl$tax_year, version = cl$version,
@@ -69,8 +83,7 @@ verify_dictionary_against_inventory <- function(dict, inventory,
                type_plausible = type_plausible, stringsAsFactors = FALSE)
   }))
 
-  hard <- res$status %in% c("missing_xpath", "not_leaf")
-  type_warn <- !is.na(res$type_plausible) & !res$type_plausible & res$status == "ok"
+  hard <- res$status %in% c("missing_xpath", "not_leaf", "type_mismatch")
   n_unver <- sum(res$status == "unverifiable_no_cell")
   passed <- !any(hard)
 
@@ -80,27 +93,23 @@ verify_dictionary_against_inventory <- function(dict, inventory,
     cli::cli_alert_warning(
       "{n_unver} claim(s) unverifiable - no Layer 1 cell (gated schema): {paste(cells, collapse=', ')}")
   }
-  if (any(type_warn)) {
-    cli::cli_alert_warning(
-      "{sum(type_warn)} claim(s) have an xsd_type inconsistent with declared data_type (coarse check)")
-  }
   if (strict && !passed) {
     m <- res[hard, c("field", "tax_year", "version", "xpath", "status", "xsd_type")]
     tbl <- paste(utils::capture.output(print(m, row.names = FALSE)), collapse = "\n")
     stop(sprintf(
-      "dictionary<->inventory: %d claim(s) do not resolve in the Layer 1 XSD inventory:\n%s",
+      "dictionary<->inventory: %d claim(s) failed verification against the Layer 1 XSD inventory:\n%s",
       sum(hard), tbl), call. = FALSE)
   }
   cli::cli_alert_success(
-    "dictionary<->inventory: {sum(res$status=='ok')}/{nrow(res)} claims verified against Layer 1 ({n_unver} unverifiable, {sum(hard)} broken)")
+    "dictionary<->inventory: {sum(res$status=='ok')}/{nrow(res)} claims verified against Layer 1 ({n_unver} unverifiable, {sum(hard)} failed)")
 
   invisible(list(
     passed = passed, results = res,
     n_ok = sum(res$status == "ok"),
     n_missing = sum(res$status == "missing_xpath"),
     n_not_leaf = sum(res$status == "not_leaf"),
-    n_unverifiable = n_unver,
-    n_type_warn = sum(type_warn)
+    n_type_mismatch = sum(res$status == "type_mismatch"),
+    n_unverifiable = n_unver
   ))
 }
 

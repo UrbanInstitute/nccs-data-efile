@@ -35,7 +35,7 @@ test_that("a claimed XPath absent from the cell is a hard failure", {
   expect_equal(r$n_missing, 1)
   expect_error(
     verify_dictionary_against_inventory(d, mk_inv(), strict = TRUE),
-    "do not resolve"
+    "failed verification"
   )
 })
 
@@ -54,12 +54,16 @@ test_that("a gated-schema cell with no inventory is unverifiable, not broken", {
   expect_equal(r$results$status, "unverifiable_no_cell")
 })
 
-test_that("coarse type check flags a numeric claim on a text element", {
+test_that("a numeric claim on a non-numeric element is a hard type_mismatch", {
   d <- mk_dict("2024:5.0:/Return/ReturnData/IRS990/Txt", data_type = "double")
   r <- verify_dictionary_against_inventory(d, mk_inv(), strict = FALSE)
-  expect_true(r$passed)                 # type mismatch is a warning, not fatal
-  expect_equal(r$n_type_warn, 1)
-  expect_false(r$results$type_plausible[1])
+  expect_false(r$passed)
+  expect_equal(r$results$status, "type_mismatch")
+  expect_equal(r$n_type_mismatch, 1)
+  expect_error(
+    verify_dictionary_against_inventory(d, mk_inv(), strict = TRUE),
+    "failed verification"
+  )
 })
 
 test_that("version normalization is symmetric", {
