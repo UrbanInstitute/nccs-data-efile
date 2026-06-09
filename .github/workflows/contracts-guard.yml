@@ -1,0 +1,26 @@
+name: contracts-guard
+
+# Thin caller of the reusable contract-change guard in nccs-contracts (ADR 0022).
+# The guard logic lives once there; this file passes only this repo's
+# paths_regex — the publish / manifest / dictionary / config / value-gate code
+# that defines WHAT or WHERE nccs-data-efile publishes (the
+# processed/efile/phase0 surface) and its schema/dimension shape. Tune the
+# regex as that surface evolves (e.g. when Phase 1+ partitioning lands).
+#
+# The guard verifies ACKNOWLEDGMENT, not correctness: a PR that touches the
+# matched paths must carry an `ADR NNNN` breadcrumb (commit message or PR body)
+# or the `contracts-ack` label, so the nccs-contracts reconcile isn't silently
+# skipped. See nccs-contracts/CONTRIBUTING.md.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  contracts-guard:
+    uses: UrbanInstitute/nccs-contracts/.github/workflows/contracts-guard.yml@main
+    with:
+      paths_regex: '^(R/run_phase0.*\.R|R/emit_.*\.R|R/dictionary\.R|R/config\.R|R/verify_value_distribution\.R|R/tail_diagnostics\.R|inst/config\.yml)$'
