@@ -122,8 +122,31 @@ A curated view selects specific raw columns, renames to form-agnostic
 ([[0013]]/[[0014]]). The existing `phase0/` outputs (`government_grants`,
 `program_related_investments`) **are** the first curated views and are
 grandfathered at their current path, still produced by the existing
-dictionary-driven path. Re-homing them as views-over-raw (so there is
-one extraction path, not two) is a later increment, not a v1 blocker.
+dictionary-driven path.
+
+**The two paths coexist deliberately, and the coexistence is the
+migration gate.** Until migration, the two scalar fields are extracted
+*twice* — by the dictionary-driven path (→ `phase0/`, the contracted
+output the dashboard pins) and by the wholesale path (→ the
+corresponding raw column, e.g. `f990_header.GovernmentGrantsAmt`). This
+is not waste: it is the cross-check. The contracted surface stays on the
+proven path so a bug in the new (unproven, scale-fresh) wholesale
+extractor cannot corrupt a live, pinned output.
+
+**Migration criterion (when `phase0/` becomes a view over the raw tier
+and the dictionary-driven path is retired):** the raw-tier column must
+equal the curated `phase0/` value **filing-for-filing across the full
+published vintage** (not a sample) for each field — i.e.
+`f990_header.GovernmentGrantsAmt == phase0/government_grants` and the PRI
+equivalent, joined on `filing_receipt_id`, with identical null patterns.
+Only once that holds for a vintage is a field re-homed as a
+view-over-raw; at that point its dictionary-driven extraction is dropped.
+
+**Trigger to start the migration:** when the raw tier is stable *and* a
+second curated view is needed — building view #3 motivates the
+views-over-raw machinery, at which point folding views #1–2 onto it
+(having passed the criterion above) is the natural, low-risk move.
+Re-homing earlier is allowed but not required; it is never a v1 blocker.
 
 ## Build sequence
 
