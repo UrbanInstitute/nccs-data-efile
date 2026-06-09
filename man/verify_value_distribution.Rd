@@ -17,24 +17,29 @@ one column per field under verification.}
 }
 \value{
 A list with \code{passed} (logical), \code{checks_run} (integer),
-\code{breaches} (list of breach descriptions), and \code{per_field}
-(named list of per-field summaries).
+\code{breaches} (list of breach descriptions), \code{per_field} (named list
+of per-field summaries), and \code{rows_evaluated} (population size).
 }
 \description{
-Samples up to \code{sample_size} rows per \verb{(tax_year, form_type)} from
-an extracted data.frame and checks per-field assertions defined in
-\code{config$verification$fields}:
+Checks per-field assertions defined in \code{config$verification$fields}
+over the FULL extracted population (one row per filing):
 }
 \details{
 \itemize{
 \item \code{type}            character; coercion sanity (currently only
 "double" is enforced; others noop).
-\item \code{min}, \code{max}      numeric value bounds for non-null observations.
+\item \code{min}, \code{max}      numeric value bounds. These are order
+statistics, so they are evaluated over every
+row, not a sample - a sample cannot bound a
+max (ADR 0002 Outcome, v2026.06 threshold
+note: the GG max $13.2B / Battelle filing and
+the negative-contribution filings only appear
+at the population tail).
 \item \code{null_rate_min},  acceptable null-rate window for the field.
 \code{null_rate_max}
 }
 
-See ADR 0001 section 6. Thresholds in \code{inst/config.yml} are
-placeholders until pinned against the first vintage's distribution
-(ADR open item #1).
+See ADR 0001 section 6. Each field's summary carries a heavy-tail
+diagnostics block (see \code{tail_diagnostics}) that is also written into
+the manifest's \code{value_distribution}.
 }

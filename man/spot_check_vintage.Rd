@@ -46,8 +46,8 @@ Satisfies ADR 0002 acceptance criterion 5.
 }
 \details{
 Independence is structural: the production extractor goes through
-\code{xml2::read_xml} -> \code{xml_ns_strip} -> \code{xml_find_first}, while this
-spot-check goes through a separate \code{xmlstarlet} process with
-explicit namespace binding on the IRS efile namespace. A bug in
-one path is unlikely to mirror in the other.
+\code{xml2::read_xml} -> namespace-aware \code{xml_find_first} (binding the IRS
+efile namespace to a prefix), while this spot-check goes through a
+separate \code{xmlstarlet} process with its own explicit namespace binding.
+A bug in one path is unlikely to mirror in the other.
 }

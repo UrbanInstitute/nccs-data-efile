@@ -151,20 +151,42 @@ default:
     # distribution, the bands are now pinned from it, so the gate
     # enforces. (Only the distribution gate honors this flag; XSD
     # verification is always strict - see run_phase0.R.)
+    #
+    # As of v2026.06 the gate evaluates min/max over the FULL
+    # population, not a sample (min/max are order statistics; a sample
+    # cannot bound them). The value bands below are therefore widened
+    # to admit the real population tail observed in v2026.06's
+    # _quality.json, while still catching the catastrophic class
+    # (all-null -> null_rate ~1.0; a cents/dollars units error ->
+    # values ~100x past these maxima):
+    #   - GG max 5.0e10: the real GG max is $13.2B (Battelle Memorial
+    #     Institute, which manages federal national labs, recurs at
+    #     ~$9-12B/yr). The old 1.0e10 ceiling predated knowledge that
+    #     Battelle-class mega-grantees exist in the tail.
+    #   - GG/PRI min -1.0e8: negative line-1e / PRI totals are
+    #     real-as-filed (they pair with a negative TotalContributionsAmt
+    #     - prior-year grant clawbacks / restatements). Observed floors
+    #     were GG -$5.7M, PRI -$55K; -$100M leaves headroom.
+    # null_rate is a proportion, so the sample-era bands still hold;
+    # they bracket the population rate (GG 0.6417, PRI 0.6178) with a
+    # ~+/-0.10 margin for year-mix drift (the 2024 share keeps growing
+    # and 2024 has the highest GG null rate ~0.73).
     strict: true
+    # Retained for reference / downstream tooling; the distribution
+    # gate no longer samples (it reads the full population).
     sample_size_per_form_year: 1000
     fields:
       government_grants:
         type: "double"
         forms_applicable: ["990"]
-        min: 0
-        max: 1.0e+10
+        min: -1.0e+8
+        max: 5.0e+10
         null_rate_min: 0.55
         null_rate_max: 0.78
       program_related_investments_total:
         type: "double"
         forms_applicable: ["990PF"]
-        min: 0
+        min: -1.0e+8
         max: 1.0e+10
         null_rate_min: 0.50
         null_rate_max: 0.72
