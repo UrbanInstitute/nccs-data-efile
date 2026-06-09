@@ -70,6 +70,17 @@ run_phase0 <- function(config = load_config(),
   # `5-0`-vs-`5.0` typo that silently nulled TY2022/2023 (ADR 0002 Outcome).
   verify_claim_coverage(index, dict, config)
 
+  # Supply-side gate (Phase 0.5): assert the dictionary's own XPath claims
+  # resolve to leaf elements in the mechanical Layer 1 XSD inventory. Catches
+  # a typo'd/renamed claim against ground truth, not just against the index.
+  # Shares the XSD cache run_phase0_verification needs, so it rides the same
+  # skip flag.
+  if (!skip_xsd_verification) {
+    verify_dictionary_against_inventory(
+      dict, build_all_xsd_inventories(config), config = config, strict = TRUE
+    )
+  }
+
   setup_future_plan(config$parallelism)
   cli::cli_alert_info(
     "extracting ({future::nbrOfWorkers()} parse workers, staging mode '{config$staging$mode %||% \"objects\"}')"
