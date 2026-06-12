@@ -28,7 +28,15 @@
 #' @return A data.frame, one row per reachable element, with columns:
 #'   `tax_year`, `version`, `xpath`, `parent_path`, `element`,
 #'   `xsd_type`, `is_leaf`, `truncated`, `min_occurs`, `max_occurs`,
-#'   `annotation`. Deduplicated on `xpath`.
+#'   `repeating`, `annotation`. Deduplicated on `xpath`.
+#'
+#'   `repeating` is `TRUE` when the element itself or any ancestor on its
+#'   path can occur more than once -- `maxOccurs="unbounded"` or a bounded
+#'   `maxOccurs` > 1 (e.g. `ForeignCountryCd` at `maxOccurs=100`)
+#'   (ADR 0004 section 1). It makes the non-repeating scalar-leaf universe
+#'   a one-line filter (`is_leaf & !repeating`) and its complement the
+#'   repeating-group universe. "Single-valued per filing" is the test, so a
+#'   bounded-multi leaf is repeating, not scalar.
 #' @export
 build_xsd_inventory <- function(tax_year, version, config = load_config(),
                                 xsd_dir = NULL, roots = NULL) {
@@ -57,7 +65,8 @@ build_xsd_inventory <- function(tax_year, version, config = load_config(),
                 occ_node = cand$node, def_node = cand$node)
     parent_path <- sub("/[^/]+$", "", r$xpath)
     enumerate_element(rec, r$xpath, parent_path, schema,
-                      visited = character(0), depth = 0L, acc = acc)
+                      visited = character(0), depth = 0L, acc = acc,
+                      repeating = FALSE)
   }
 
   df <- inventory_rows_to_df(acc$rows, tax_year, version)
@@ -281,7 +290,7 @@ is_top_level_element <- function(node) {
 #' cap stops descent; the element is still emitted with `truncated=TRUE`.
 #' @noRd
 enumerate_element <- function(rec, xpath, parent_path, schema,
-                              visited, depth, acc) {
+                              visited, depth, acc, repeating) {
   children <- element_children(rec, schema)
 
   named_type <- !is.null(rec$type) && !is.na(rec$type) && rec$type != "(anonymous)"
@@ -290,17 +299,30 @@ enumerate_element <- function(rec, xpath, parent_path, schema,
   truncated <- (cycle || hit_cap) && length(children) > 0
   if (cycle || hit_cap) children <- list()
 
+  # This element repeats if it can occur more than once itself (maxOccurs
+  # "unbounded" OR a bounded count > 1, e.g. ForeignCountryCd maxOccurs=100)
+  # or sits anywhere under such an ancestor (ADR 0004 section 1). `repeating`
+  # carries the ancestor state down the DFS; OR-in this element's own
+  # cardinality before emitting and before passing the state to the children.
+  self_max <- xml2::xml_attr(rec$occ_node, "maxOccurs")
+  self_repeating <- !is.na(self_max) && (
+    self_max == "unbounded" ||
+      (!is.na(suppressWarnings(as.integer(self_max))) && as.integer(self_max) > 1L)
+  )
+  row_repeating <- isTRUE(repeating) || self_repeating
+
   emit_inventory_row(
     acc, xpath, parent_path, rec, schema,
     is_leaf = (length(children) == 0 && !truncated),
-    truncated = truncated
+    truncated = truncated,
+    repeating = row_repeating
   )
 
   if (length(children) == 0) return(invisible(NULL))
   next_visited <- if (named_type) c(visited, rec$type) else visited
   for (ch in children) {
     enumerate_element(ch, paste0(xpath, "/", ch$name), xpath, schema,
-                      next_visited, depth + 1L, acc)
+                      next_visited, depth + 1L, acc, repeating = row_repeating)
   }
   invisible(NULL)
 }
@@ -308,7 +330,7 @@ enumerate_element <- function(rec, xpath, parent_path, schema,
 #' Append one inventory row to the accumulator.
 #' @noRd
 emit_inventory_row <- function(acc, xpath, parent_path, rec, schema,
-                               is_leaf, truncated) {
+                               is_leaf, truncated, repeating) {
   occ <- rec$occ_node
   min_occurs <- xml2::xml_attr(occ, "minOccurs")
   if (is.na(min_occurs)) min_occurs <- "1"
@@ -325,6 +347,7 @@ emit_inventory_row <- function(acc, xpath, parent_path, rec, schema,
     truncated = truncated,
     min_occurs = min_occurs,
     max_occurs = max_occurs,
+    repeating = repeating,
     annotation = element_annotation(rec, schema$ns)
   )
   invisible(NULL)
@@ -460,11 +483,11 @@ resolve_child_record <- function(decl, schema) {
 #' @noRd
 inventory_rows_to_df <- function(rows, tax_year, version) {
   cols <- c("xpath", "parent_path", "element", "xsd_type", "is_leaf",
-            "truncated", "min_occurs", "max_occurs", "annotation")
+            "truncated", "min_occurs", "max_occurs", "repeating", "annotation")
   if (length(rows) == 0) {
     empty <- data.frame(tax_year = character(0), version = character(0),
                         stringsAsFactors = FALSE)
-    for (cl in cols) empty[[cl]] <- if (cl %in% c("is_leaf", "truncated")) {
+    for (cl in cols) empty[[cl]] <- if (cl %in% c("is_leaf", "truncated", "repeating")) {
       logical(0)
     } else {
       character(0)
@@ -487,6 +510,7 @@ inventory_rows_to_df <- function(rows, tax_year, version) {
     truncated = lgl("truncated"),
     min_occurs = chr("min_occurs"),
     max_occurs = chr("max_occurs"),
+    repeating = lgl("repeating"),
     annotation = chr("annotation"),
     stringsAsFactors = FALSE
   )

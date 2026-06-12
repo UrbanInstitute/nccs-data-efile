@@ -32,16 +32,21 @@ repeating groups.
 
 A field is in the header-table universe iff, in the Layer 1 inventory,
 it is a **leaf** (`is_leaf == TRUE`) and **non-repeating** — no element
-on its `parent_path` (nor itself) has `max_occurs == "unbounded"`. A
-filing occurs at most once, so each such field is single-valued per
-filing.
+on its `parent_path` (nor itself) **can occur more than once**. The test
+is "single-valued per filing": an element repeats if its `max_occurs` is
+`"unbounded"` **or** a bounded count > 1. (Implementation found the
+bounded case is real and load-bearing: IRS990 `ForeignCountryCd` is
+`maxOccurs=100`, `StatesWhereCopyOfReturnIsFldCd` is `60` — genuine
+multi-valued leaves that an `unbounded`-only rule would wrongly admit as
+scalars. The original wording said `== "unbounded"`; broadened here to
+match this section's own "single-valued per filing" rationale.)
 
 Computing "non-repeating" requires walking each leaf's ancestor chain
 against the inventory. We add a derived boolean column **`repeating`**
 to the Layer 1 inventory output (`xsd_inventory.R`) — TRUE if the
-element or any ancestor is unbounded — so the scalar set is a one-line
-filter (`is_leaf & !repeating`) and the repeating universe (for the
-deferred child tables) is its complement.
+element or any ancestor can occur more than once — so the scalar set is
+a one-line filter (`is_leaf & !repeating`) and the repeating universe
+(for the deferred child tables) is its complement.
 
 ### 2. Extraction engine — extend, don't replace
 

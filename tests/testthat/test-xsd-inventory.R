@@ -13,6 +13,7 @@ make_inventory_fixture <- function(dir) {
         <xsd:annotation><xsd:documentation>Money field</xsd:documentation></xsd:annotation>
       </xsd:element>
       <xsd:element name="Items" type="ItemType" minOccurs="0" maxOccurs="unbounded"/>
+      <xsd:element name="Tags" type="TextType" minOccurs="0" maxOccurs="3"/>
       <xsd:element ref="SharedThing" minOccurs="0"/>
       <xsd:element name="Inline">
         <xsd:complexType><xsd:sequence>
@@ -75,6 +76,40 @@ test_that("repeating element carries unbounded maxOccurs and descends", {
   expect_equal(items$max_occurs, "unbounded")
   expect_false(items$is_leaf)
   expect_true("/R/Root/Items/ItemName" %in% inv$xpath)
+})
+
+test_that("repeating flag marks unbounded elements and their descendants", {
+  inv <- build_fixture_inventory(root_root)
+  # the unbounded group root is itself repeating ...
+  expect_true(inv$repeating[inv$xpath == "/R/Root/Items"])
+  # ... and so is a scalar leaf nested under it (inherited down the path)
+  expect_true(inv$repeating[inv$xpath == "/R/Root/Items/ItemName"])
+  # a bounded maxOccurs>1 leaf is multi-valued => repeating (ADR 0004 s1)
+  tags <- inv[inv$xpath == "/R/Root/Tags", ]
+  expect_equal(tags$max_occurs, "3")
+  expect_true(tags$is_leaf)
+  expect_true(tags$repeating)
+  # a maxOccurs="1" leaf, and the form root, are not repeating
+  expect_false(inv$repeating[inv$xpath == "/R/Root/Amount"])
+  expect_false(inv$repeating[inv$xpath == "/R/Root"])
+  expect_false(inv$repeating[inv$xpath == "/R/Root/SharedThing"])
+})
+
+test_that("is_leaf & !repeating selects exactly the non-repeating scalar leaves", {
+  inv <- build_fixture_inventory(root_root)
+  scalars <- inv$xpath[inv$is_leaf & !inv$repeating]
+  # present: leaves not under any unbounded ancestor
+  expect_true(all(c("/R/Root/Amount", "/R/Root/SharedThing",
+                    "/R/Root/Inline/InnerLeaf", "/R/Root/Node/Leaf") %in% scalars))
+  # absent: a leaf under the unbounded Items group, and a bounded-multi leaf
+  expect_false("/R/Root/Items/ItemName" %in% scalars)
+  expect_false("/R/Root/Tags" %in% scalars)
+})
+
+test_that("repeating is a logical column", {
+  inv <- build_fixture_inventory(root_root)
+  expect_type(inv$repeating, "logical")
+  expect_false(anyNA(inv$repeating))
 })
 
 test_that("ref resolves to the global element's type and annotation", {

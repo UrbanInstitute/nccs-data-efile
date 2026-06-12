@@ -31,7 +31,15 @@ enumerate from. Defaults to 990 + 990PF + ReturnHeader.}
 A data.frame, one row per reachable element, with columns:
 \code{tax_year}, \code{version}, \code{xpath}, \code{parent_path}, \code{element},
 \code{xsd_type}, \code{is_leaf}, \code{truncated}, \code{min_occurs}, \code{max_occurs},
-\code{annotation}. Deduplicated on \code{xpath}.
+\code{repeating}, \code{annotation}. Deduplicated on \code{xpath}.
+
+\code{repeating} is \code{TRUE} when the element itself or any ancestor on its
+path can occur more than once -- \code{maxOccurs="unbounded"} or a bounded
+\code{maxOccurs} > 1 (e.g. \code{ForeignCountryCd} at \code{maxOccurs=100})
+(ADR 0004 section 1). It makes the non-repeating scalar-leaf universe
+a one-line filter (\code{is_leaf & !repeating}) and its complement the
+repeating-group universe. "Single-valued per filing" is the test, so a
+bounded-multi leaf is repeating, not scalar.
 }
 \description{
 Enumerates every element reachable from the configured form roots in
