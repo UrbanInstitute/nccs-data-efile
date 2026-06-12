@@ -1,4 +1,4 @@
-#' Run a wholesale relational (scalar) extraction build — ADR 0004 step 3.
+#' Run a wholesale relational (scalar) extraction build - ADR 0004 step 3.
 #'
 #' Drives the raw researcher tier end-to-end:
 #'   1. Build the relational plan from the Layer 1 inventory (`is_leaf &
@@ -10,7 +10,7 @@
 #'   4. Write each table partitioned by `tax_year`, with a per-table dictionary,
 #'      a best-effort/uncontracted marker, and a manifest.
 #'
-#' S3 publication is NOT here — `inst/scripts/run_relational.R` syncs each table
+#' S3 publication is NOT here - `inst/scripts/run_relational.R` syncs each table
 #' dir to `relational/{table}/{vintage}/` after a clean build, so a failed build
 #' never half-publishes. The tier is best-effort / uncontracted (ADR 0004
 #' section 4 / nccs-contracts 0028): provenance is shipped, stability is not
@@ -78,7 +78,7 @@ extract_relational <- function(index, plan, config, out_dir) {
   )
 }
 
-#' ZIP-bulk relational extraction — the scale path. Mirrors `extract_via_zips`,
+#' ZIP-bulk relational extraction - the scale path. Mirrors `extract_via_zips`,
 #' but each filing yields rows for several tables, so each ZIP checkpoints ONE
 #' parquet per table (`{chunk}/{zip}__{table}.parquet`, empty if a table got no
 #' rows so resume still detects completion). Final assembly reads, unions,
@@ -236,7 +236,7 @@ bind_relational_by_table <- function(per_filing, table_names) {
 }
 
 #' A zero-row chunk carrying just the keys, for a (zip, table) pair that matched
-#' no filings — so resume still sees the checkpoint as complete.
+#' no filings - so resume still sees the checkpoint as complete.
 #' @noRd
 empty_relational_chunk <- function() {
   data.frame(filing_receipt_id = character(0), ein = character(0),
@@ -255,7 +255,7 @@ write_relational_tables <- function(tables, plan, out_dir, config, vintage) {
   for (tn in names(tables)) {
     tbl <- tables[[tn]]
     if (is.null(tbl) || nrow(tbl) == 0) {
-      cli::cli_alert_warning("{tn}: 0 rows — not written")
+      cli::cli_alert_warning("{tn}: 0 rows - not written")
       next
     }
     tdir <- file.path(out_dir, tn)
@@ -269,7 +269,7 @@ write_relational_tables <- function(tables, plan, out_dir, config, vintage) {
                      file.path(tdir, "_dictionary.csv"), row.names = FALSE)
     writeLines(c(
       "TIER: relational (raw, XSD-faithful researcher catalog).",
-      "STATUS: best-effort / UNCONTRACTED — no stability guarantee (ADR 0004 s4, nccs-contracts 0028).",
+      "STATUS: best-effort / UNCONTRACTED - no stability guarantee (ADR 0004 s4, nccs-contracts 0028).",
       "Column names are the element path relative to the form root; curated views (snake_case,",
       "contracted) are produced separately. Provenance is in _manifest.json."),
       file.path(tdir, "_TIER.txt"))
