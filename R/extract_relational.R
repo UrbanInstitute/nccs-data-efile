@@ -233,14 +233,21 @@ extract_filings_relational <- function(index, plan, max_bytes = 50e6,
       next
     }
     tbl <- as.data.frame(data.table::rbindlist(parts, use.names = TRUE, fill = TRUE))
-    leaves <- plan[[tname]]$leaves
-    for (i in seq_len(nrow(leaves))) {
-      cn <- leaves$col_name[[i]]
-      if (cn %in% names(tbl)) {
-        tbl[[cn]] <- coerce_relational_column(tbl[[cn]], leaves$target_type[[i]])
-      }
-    }
-    out[[tname]] <- tbl
+    out[[tname]] <- type_relational_table(tbl, plan[[tname]]$leaves)
   }
   out
+}
+
+#' Type each value column of an assembled relational table per its plan slice,
+#' with the raw-string fallback (see `coerce_relational_column`). Shared by the
+#' objects path and the ZIP scale path's final assembly.
+#' @noRd
+type_relational_table <- function(tbl, leaves) {
+  for (i in seq_len(nrow(leaves))) {
+    cn <- leaves$col_name[[i]]
+    if (cn %in% names(tbl)) {
+      tbl[[cn]] <- coerce_relational_column(tbl[[cn]], leaves$target_type[[i]])
+    }
+  }
+  tbl
 }
