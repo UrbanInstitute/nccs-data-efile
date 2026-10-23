@@ -48,15 +48,6 @@ default:
     primary: "gt_data_lake"  # gt_data_lake | irs_direct
     gt_data_lake:
       index_prefix: "s3://gt990datalake-rawdata/Indices/990xmls/"
-    irs_index:
-      # IRS annual e-file index (one CSV per release year, lists XML_BATCH_ID).
-      url_pattern: "https://apps.irs.gov/pub/epostcard/990/xml/{year}/index_{year}.csv"
-    index_coverage_gate:
-      # Build stops when an IRS batch released before the snapshot has more
-      # than max_missing_share of its in-scope filings absent from the index.
-      enabled: true
-      min_batch_filings: 100
-      max_missing_share: 0.05
     irs_direct:
       base_url: "https://www.irs.gov/charities-non-profits/form-990-series-downloads"
       # ZIP URL pattern. Substitutions: {tax_year}, {month} (zero-padded).

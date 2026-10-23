@@ -8,6 +8,7 @@ verify_index_coverage(
   index,
   irs,
   scope,
+  batch_dates = NULL,
   as_of = Sys.Date(),
   min_batch_filings = 100L,
   max_missing_share = 0.05,
@@ -22,10 +23,13 @@ verify_index_coverage(
 
 \item{scope}{\code{config$scope} (\code{forms}, \code{tax_years}).}
 
-\item{as_of}{Date of the build index snapshot. Batches released in or
-after the month of \code{as_of} may postdate the snapshot (the IRS batch id
-carries only the month), so they are reported but not counted as
-failures.}
+\item{batch_dates}{Publication date per batch as returned by
+\code{irs_batch_dates()}. A batch with no date is treated as published
+before the snapshot (the conservative reading) and marked
+\code{date_unknown}.}
+
+\item{as_of}{Date of the build index snapshot. Batches published after
+\code{as_of} cannot be in the snapshot and are reported, not failed.}
 
 \item{min_batch_filings}{Batches with fewer in-scope filings than this
 are reported but never fail the gate.}
@@ -37,11 +41,12 @@ may be absent from the build index before the gate fails.}
 }
 \value{
 A list with \code{passed}, \code{as_of}, \code{batches} (one row per batch:
-\code{xml_batch_id}, \code{release_month}, \code{n_irs}, \code{n_in_index}, \code{missing_share},
-\code{status}) and \code{failed} (the batch ids that failed). Status values:
-\code{ok}, \code{missing} (fails the gate), \code{small}, \code{after_snapshot}, and
-\code{no_batch_id} for filings from IRS index years that predate the
-\code{XML_BATCH_ID} column (reported, never failed).
+\code{xml_batch_id}, \code{published}, \code{n_irs}, \code{n_ambiguous}, \code{n_in_index},
+\code{missing_share}, \code{status}) and \code{failed} (the batch ids that failed).
+Status values: \code{ok}, \code{missing} (fails the gate), \code{small},
+\code{after_snapshot}, \code{no_batch_id} (IRS index years before 2024 carry no
+batch id; reported, never failed). \code{date_unknown} is appended to the
+status when the server gave no publication date.
 }
 \description{
 Compares the in-scope filings of the IRS annual indices, batch by batch,
@@ -53,6 +58,14 @@ silently under-cover those months.
 \details{
 Background: the GivingTuesday index omitted IRS batches 2025_09A,
 2025_10A, part of 2026_05A and 2026_08A. The Phase 0 vintage v2026.06
-was built from that index and lacks 59,092 in-scope filings that the IRS
-had published before the build (NCCS review, 2026-10-23).
+was built from that index on 2026-06-08 and lacks 37,211 in-scope
+filings from 2025_09A and 2025_10A, both published by 2025-11-19, and a
+further 32,250 from batches published after the build (NCCS review,
+2026-10-23).
+
+Rows whose estimated tax year equals the last year in scope
+and whose period does not end in December may be short-year returns
+of the following tax year, which the build index would never hold.
+They are excluded from the denominators and counted in
+\code{n_ambiguous}, so a scope boundary cannot produce a false gap.
 }

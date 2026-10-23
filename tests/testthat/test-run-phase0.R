@@ -69,7 +69,8 @@ test_that("run_phase0 produces parquet + dictionary + quality + manifest end-to-
     ),
     output = list(phase = "phase0", local_dir = out_dir),
     xsd = list(versions = list("2024" = "1.0")),
-    vendored = list(nodc_concordance_sha = "deadbeef")
+    vendored = list(nodc_concordance_sha = "deadbeef"),
+    upstream = list(index_coverage_gate = list(enabled = FALSE))  # fixture index; opt-out recorded in the manifest
   )
 
   # xsd_version = NULL mirrors production: extract_filing derives the

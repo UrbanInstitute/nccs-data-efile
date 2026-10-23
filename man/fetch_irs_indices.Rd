@@ -19,11 +19,16 @@ gives the URL with \code{{year}} substituted.}
 
 \item{local_cache_dir}{Directory for the downloaded files.}
 
-\item{skip_sync}{When TRUE, only files already in the cache are read.}
+\item{skip_sync}{When TRUE, only files already in the cache are read.
+When FALSE (the default) every file is downloaded again: the IRS
+rewrites the current year's index with each monthly batch, so a cached
+copy goes stale within weeks.}
 }
 \value{
 A data.frame with columns \code{object_id}, \code{return_type},
-\code{tax_period}, \code{tax_year}, \code{xml_batch_id}, \code{index_year}.
+\code{tax_period}, \code{tax_year}, \code{tax_year_ambiguous}, \code{xml_batch_id},
+\code{index_year}, with attribute \code{sources}: one row per file giving \code{url},
+\code{path}, \code{retrieved_at_utc}, \code{bytes}, \code{sha256}, \code{rows}.
 }
 \description{
 The IRS publishes one index CSV per calendar year of release
@@ -35,7 +40,10 @@ independent of any mirror.
 \details{
 \code{tax_year} is derived from \code{TAX_PERIOD} (YYYYMM, period end):
 the end year when the period ends in December, otherwise the end year
-minus one. This matches the IRS and GivingTuesday \code{TaxYear} convention
-for fiscal-year filers. Index files before 2024 carry no
+minus one. That is the convention for fiscal-year filers, but a
+short-year return (for example January to June 2024, \code{TaxYr} 2024) is
+assigned the earlier year. \code{tax_year_ambiguous} is TRUE for every
+non-December period end; see \code{verify_index_coverage()} for how the
+gate treats those rows. Index files before 2024 carry no
 \code{XML_BATCH_ID}; their filings are grouped under \code{no_batch_id}.
 }

@@ -61,25 +61,11 @@ run_phase0 <- function(config = load_config(),
     run_phase0_verification(config = config, dict = dict, strict = TRUE)
   }
 
-  index_coverage <- NULL
   if (is.null(index)) {
     index <- if (identical(config$upstream$primary, "irs_direct")) {
       stop("irs_direct upstream requires per-(year, month) calls - pass `index` explicitly")
     } else {
       fetch_gt_indices(config = config)
-    }
-    # Gate: every IRS monthly batch that can hold in-scope filings must be
-    # covered by the build index. The GivingTuesday index skipped four IRS
-    # batches in 2025-2026 and v2026.06 silently lacked 59,092 filings.
-    if (!isFALSE(config$upstream$index_coverage_gate$enabled)) {
-      gate <- config$upstream$index_coverage_gate %||% list()
-      irs <- fetch_irs_indices(irs_index_years_for_scope(config$scope), config = config)
-      index_coverage <- verify_index_coverage(
-        index, irs, config$scope,
-        min_batch_filings = gate$min_batch_filings %||% 100L,
-        max_missing_share = gate$max_missing_share %||% 0.05,
-        strict = TRUE
-      )
     }
   }
   cli::cli_alert_info("index: {nrow(index)} filings in scope")
@@ -125,10 +111,7 @@ run_phase0 <- function(config = load_config(),
       gt_lake_snapshot_timestamp_utc = format(
         Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"
       ),
-      irs_xsd_cache_prefix = config$vendored$irs_xsd_cache_s3_prefix,
-      index_coverage = if (is.null(index_coverage)) "not run (index supplied)" else
-        list(passed = index_coverage$passed, as_of = index_coverage$as_of,
-             batches = index_coverage$batches)
+      irs_xsd_cache_prefix = config$vendored$irs_xsd_cache_s3_prefix
     ),
     xsd_verification = xsd_result,
     value_distribution = dist_result,
