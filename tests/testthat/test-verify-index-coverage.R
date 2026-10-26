@@ -117,3 +117,44 @@ test_that("index years span the scope's first filing year to the snapshot year",
   expect_equal(nccs.data.efile:::irs_index_years_for_scope(list(tax_years = 2020:2024), as.Date("2026-06-08")),
                2021:2026)
 })
+
+# ---- run_index_coverage_gate(): the manifest block ------------------------
+
+test_that("the gate runner records an opt-out in the manifest block", {
+  cfg <- list(scope = scope, upstream = list(index_coverage_gate = list(enabled = FALSE)))
+  block <- run_index_coverage_gate(all_covered, cfg)
+  expect_false(block$enabled)
+  expect_equal(block$reason, "opted out in config")
+})
+
+test_that("the gate runner returns the manifest block when every batch is covered", {
+  irs <- irs_fixture()
+  attr(irs, "sources") <- data.frame(
+    url = "https://example.invalid/index_2025.csv", path = "index_2025.csv",
+    retrieved_at_utc = "2025-12-15T00:00:00Z", bytes = 10L, sha256 = "abc", rows = 12L,
+    stringsAsFactors = FALSE
+  )
+  cfg <- list(scope = scope,
+              upstream = list(index_coverage_gate = list(enabled = TRUE, min_batch_filings = 1)))
+  block <- run_index_coverage_gate(all_covered, cfg, as_of = as.Date("2025-12-15"),
+                                   irs = irs, batch_dates = dates_fixture)
+  expect_true(block$enabled)
+  expect_true(block$passed)
+  expect_equal(block$as_of, "2025-12-15")
+  expect_equal(block$max_missing_share, 0.05)
+  expect_equal(block$min_batch_filings, 1L)
+  expect_equal(names(block$irs_index_files), c("url", "retrieved_at_utc", "bytes", "sha256", "rows"))
+  expect_equal(block$batches$xml_batch_id, c("2025_TEOS_XML_01A", "2025_TEOS_XML_09A"))
+  expect_type(block$batches$published, "character")
+  expect_length(block$failed, 0)
+})
+
+test_that("the gate runner stops the build when a published batch is missing", {
+  cfg <- list(scope = scope,
+              upstream = list(index_coverage_gate = list(enabled = TRUE, min_batch_filings = 1)))
+  expect_error(
+    run_index_coverage_gate(covered_01a, cfg, as_of = as.Date("2025-12-15"),
+                            irs = irs_fixture(), batch_dates = dates_fixture),
+    "2025_TEOS_XML_09A"
+  )
+})

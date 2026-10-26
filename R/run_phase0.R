@@ -70,6 +70,14 @@ run_phase0 <- function(config = load_config(),
   }
   cli::cli_alert_info("index: {nrow(index)} filings in scope")
 
+  # IRS batch coverage gate (ADR 0017 Outcome). The build index comes from a
+  # mirror that has skipped whole IRS batches before (v2026.06 lacks
+  # 37,211 in-scope filings from 2025_09A and 2025_10A). Compare it, batch
+  # by batch, against the IRS annual index files; stop before extraction if
+  # a published batch is under-covered. The result, or the opt-out, is
+  # recorded in the manifest as inputs.index_coverage.
+  index_coverage <- run_index_coverage_gate(index, config, as_of = Sys.Date())
+
   # Fail fast if any in-scope (tax_year, version) lacks a resolving XPath claim
   # for an output field. This is the gate that would have caught the v2026.05
   # `5-0`-vs-`5.0` typo that silently nulled TY2022/2023 (ADR 0002 Outcome).
@@ -111,7 +119,8 @@ run_phase0 <- function(config = load_config(),
       gt_lake_snapshot_timestamp_utc = format(
         Sys.time(), "%Y-%m-%dT%H:%M:%SZ", tz = "UTC"
       ),
-      irs_xsd_cache_prefix = config$vendored$irs_xsd_cache_s3_prefix
+      irs_xsd_cache_prefix = config$vendored$irs_xsd_cache_s3_prefix,
+      index_coverage = index_coverage
     ),
     xsd_verification = xsd_result,
     value_distribution = dist_result,

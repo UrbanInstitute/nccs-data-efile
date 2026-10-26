@@ -53,6 +53,23 @@ default:
       # ZIP URL pattern. Substitutions: {tax_year}, {month} (zero-padded).
       # Open item - pin once the exact URL pattern is verified.
       url_pattern: ~
+    # IRS annual index files (index_YYYY.csv) and batch ZIPs. The index
+    # files are the authoritative list of what the IRS has published and
+    # drive the coverage gate below. {year} and {batch} are substituted.
+    irs_index:
+      url_pattern: "https://apps.irs.gov/pub/epostcard/990/xml/{year}/index_{year}.csv"
+      zip_pattern: "https://apps.irs.gov/pub/epostcard/990/xml/{year}/{batch}.zip"
+    # Coverage gate: before extraction, compare the build index against the
+    # IRS index files batch by batch (verify_index_coverage()). A batch the
+    # IRS published on or before the build date with more than
+    # max_missing_share of its in-scope filings absent stops the build.
+    # Opting out is recorded in the manifest (inputs.index_coverage).
+    index_coverage_gate:
+      enabled: true
+      max_missing_share: 0.05
+      min_batch_filings: 100
+      local_cache_dir: ~        # default ~/.cache/nccs-data-efile/irs-indices
+      skip_sync: false          # true = use cached IRS files only (offline)
 
   vendored:
     # Pinned SHA of NODC concordance file. See ADR 0001 §8.
