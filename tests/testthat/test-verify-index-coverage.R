@@ -158,3 +158,34 @@ test_that("the gate runner stops the build when a published batch is missing", {
     "2025_TEOS_XML_09A"
   )
 })
+
+test_that("a partial IRS index cache is an error, not a pass", {
+  cache_dir <- tempfile("irs-cache-")
+  dir.create(cache_dir)
+  on.exit(unlink(cache_dir, recursive = TRUE), add = TRUE)
+  writeLines(
+    c("RETURN_ID,FILING_TYPE,EIN,TAX_PERIOD,SUB_DATE,TAXPAYER_NAME,RETURN_TYPE,DLN,OBJECT_ID,XML_BATCH_ID",
+      "1,EFILE,000000001,202312,2024-05-01,ORG,990,1,obj01,2024_TEOS_XML_05A"),
+    file.path(cache_dir, "index_2024.csv")
+  )
+  # Only 2024 is cached; 2025 is requested too. The missing year must stop
+  # the read rather than be skipped, or the check would pass on part of
+  # the IRS record.
+  expect_error(
+    fetch_irs_indices(2024:2025, config = list(), local_cache_dir = cache_dir, skip_sync = TRUE),
+    "2025"
+  )
+  # The complete cache reads fine.
+  irs <- fetch_irs_indices(2024L, config = list(), local_cache_dir = cache_dir, skip_sync = TRUE)
+  expect_equal(irs$object_id, "obj01")
+  expect_equal(irs$xml_batch_id, "2024_TEOS_XML_05A")
+
+  # The same partial cache through the runner: error, not enabled/passed.
+  cfg <- list(scope = list(forms = "990", tax_years = 2023:2024),
+              upstream = list(index_coverage_gate = list(enabled = TRUE, skip_sync = TRUE,
+                                                         local_cache_dir = cache_dir)))
+  expect_error(
+    run_index_coverage_gate(data.frame(object_id = "obj01"), cfg, as_of = as.Date("2025-12-15")),
+    "2025"
+  )
+})

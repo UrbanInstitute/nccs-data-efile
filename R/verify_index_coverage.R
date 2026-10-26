@@ -10,10 +10,11 @@
 #' @param config Package config; `config$upstream$irs_index$url_pattern`
 #'   gives the URL with `{year}` substituted.
 #' @param local_cache_dir Directory for the downloaded files.
-#' @param skip_sync When TRUE, only files already in the cache are read.
-#'   When FALSE (the default) every file is downloaded again: the IRS
-#'   rewrites the current year's index with each monthly batch, so a cached
-#'   copy goes stale within weeks.
+#' @param skip_sync When TRUE, only files already in the cache are read,
+#'   and every requested year must be there: a missing file is an error,
+#'   never silently skipped. When FALSE (the default) every file is
+#'   downloaded again: the IRS rewrites the current year's index with each
+#'   monthly batch, so a cached copy goes stale within weeks.
 #' @return A data.frame with columns `object_id`, `return_type`,
 #'   `tax_period`, `tax_year`, `tax_year_ambiguous`, `xml_batch_id`,
 #'   `index_year`, with attribute `sources`: one row per file giving `url`,
@@ -53,8 +54,11 @@ fetch_irs_indices <- function(index_years,
       file.rename(tmp, local_path)
     }
     if (!file.exists(local_path)) {
-      cli::cli_alert_warning("no IRS index for {year}")
-      next
+      # Every requested year must be present. Skipping a year would let the
+      # coverage check pass on a partial cache, with whole IRS releases
+      # unseen (Codex review of PR #18).
+      stop("IRS index file for ", year, " is not in the cache (", local_path,
+           ") and skip_sync = TRUE; fetch it or run with skip_sync = FALSE")
     }
     part <- parse_irs_index_csv(local_path, year)
     parts[[as.character(year)]] <- part
