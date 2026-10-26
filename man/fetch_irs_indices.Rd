@@ -19,10 +19,11 @@ gives the URL with \code{{year}} substituted.}
 
 \item{local_cache_dir}{Directory for the downloaded files.}
 
-\item{skip_sync}{When TRUE, only files already in the cache are read.
-When FALSE (the default) every file is downloaded again: the IRS
-rewrites the current year's index with each monthly batch, so a cached
-copy goes stale within weeks.}
+\item{skip_sync}{When TRUE, only files already in the cache are read,
+and every requested year must be there: a missing file is an error,
+never silently skipped. When FALSE (the default) every file is
+downloaded again: the IRS rewrites the current year's index with each
+monthly batch, so a cached copy goes stale within weeks.}
 }
 \value{
 A data.frame with columns \code{object_id}, \code{return_type},

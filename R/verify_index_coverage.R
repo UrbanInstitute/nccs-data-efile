@@ -10,10 +10,11 @@
 #' @param config Package config; `config$upstream$irs_index$url_pattern`
 #'   gives the URL with `{year}` substituted.
 #' @param local_cache_dir Directory for the downloaded files.
-#' @param skip_sync When TRUE, only files already in the cache are read.
-#'   When FALSE (the default) every file is downloaded again: the IRS
-#'   rewrites the current year's index with each monthly batch, so a cached
-#'   copy goes stale within weeks.
+#' @param skip_sync When TRUE, only files already in the cache are read,
+#'   and every requested year must be there: a missing file is an error,
+#'   never silently skipped. When FALSE (the default) every file is
+#'   downloaded again: the IRS rewrites the current year's index with each
+#'   monthly batch, so a cached copy goes stale within weeks.
 #' @return A data.frame with columns `object_id`, `return_type`,
 #'   `tax_period`, `tax_year`, `tax_year_ambiguous`, `xml_batch_id`,
 #'   `index_year`, with attribute `sources`: one row per file giving `url`,
@@ -53,8 +54,11 @@ fetch_irs_indices <- function(index_years,
       file.rename(tmp, local_path)
     }
     if (!file.exists(local_path)) {
-      cli::cli_alert_warning("no IRS index for {year}")
-      next
+      # Every requested year must be present. Skipping a year would let the
+      # coverage check pass on a partial cache, with whole IRS releases
+      # unseen (Codex review of PR #18).
+      stop("IRS index file for ", year, " is not in the cache (", local_path,
+           ") and skip_sync = TRUE; fetch it or run with skip_sync = FALSE")
     }
     part <- parse_irs_index_csv(local_path, year)
     parts[[as.character(year)]] <- part
@@ -312,4 +316,113 @@ irs_index_years_for_scope <- function(scope, as_of = Sys.Date()) {
   tax_years <- as.integer(scope$tax_years %||% integer(0))
   if (length(tax_years) == 0) stop("scope$tax_years is empty")
   seq.int(min(tax_years) + 1L, as.integer(format(as.Date(as_of), "%Y")))
+}
+
+# ---- Gate runner for the Phase 0 build -------------------------------------
+
+#' Run the IRS batch coverage gate for a Phase 0 build
+#'
+#' Fetches the IRS annual index files for the build scope, reads each
+#' batch's publication date from the IRS server, compares the build index
+#' against them with `verify_index_coverage()`, and returns the block that
+#' `run_phase0()` records in the manifest as `inputs.index_coverage`.
+#'
+#' The gate is on by default. `config$upstream$index_coverage_gate` holds
+#' the settings: `enabled`, `max_missing_share`, `min_batch_filings`,
+#' `local_cache_dir`, `skip_sync`. Opting out is explicit and is itself
+#' recorded in the manifest, so a published vintage always says whether
+#' its index was checked against the IRS.
+#'
+#' @param index The build index (column `object_id`), already filtered to
+#'   scope, as returned by `fetch_gt_indices()`.
+#' @param config Package config.
+#' @param as_of Date of the build index snapshot. Batches the IRS published
+#'   after this date are reported, not failed.
+#' @param irs Optional IRS index as returned by `fetch_irs_indices()`. When
+#'   supplied, no index file is downloaded (used by tests).
+#' @param batch_dates Optional publication dates as returned by
+#'   `irs_batch_dates()`. When supplied, the IRS server is not contacted.
+#' @return A list for the manifest. When the gate is off: `enabled = FALSE`
+#'   and `reason`. When it runs: `enabled = TRUE`, `passed`, `as_of`,
+#'   `max_missing_share`, `min_batch_filings`, `irs_index_files` (one row
+#'   per IRS index file: `url`, `retrieved_at_utc`, `bytes`, `sha256`,
+#'   `rows`), `batches` (the per-batch table from
+#'   `verify_index_coverage()`) and `failed`.
+#' @details The gate runs in strict mode: a failed batch stops the build
+#'   before extraction, so a manifest carrying `passed = FALSE` is never
+#'   written. The IRS index years fetched run from the year after the
+#'   earliest tax year in scope to the year of `as_of`.
+#' @export
+run_index_coverage_gate <- function(index,
+                                    config,
+                                    as_of = Sys.Date(),
+                                    irs = NULL,
+                                    batch_dates = NULL) {
+  gate_config <- config$upstream$index_coverage_gate %||% list()
+  enabled <- gate_config$enabled %||% TRUE
+
+  if (!isTRUE(enabled)) {
+    cli::cli_alert_warning(
+      "index coverage gate: opted out in config (upstream.index_coverage_gate.enabled = false)"
+    )
+    return(list(enabled = FALSE, reason = "opted out in config"))
+  }
+
+  max_missing_share <- gate_config$max_missing_share %||% 0.05
+  min_batch_filings <- as.integer(gate_config$min_batch_filings %||% 100L)
+  local_cache_dir <- gate_config$local_cache_dir
+  skip_sync <- isTRUE(gate_config$skip_sync)
+
+  # IRS index files: the authoritative list of what the IRS has published.
+  if (is.null(irs)) {
+    index_years <- irs_index_years_for_scope(config$scope, as_of = as_of)
+    irs <- fetch_irs_indices(
+      index_years,
+      config = config,
+      local_cache_dir = local_cache_dir,
+      skip_sync = skip_sync
+    )
+  }
+
+  # Publication date per batch, from the ZIP's Last-Modified header.
+  if (is.null(batch_dates)) {
+    batch_dates <- irs_batch_dates(
+      unique(irs$xml_batch_id),
+      config = config,
+      local_cache_dir = local_cache_dir,
+      skip_sync = skip_sync
+    )
+  }
+
+  result <- verify_index_coverage(
+    index,
+    irs,
+    config$scope,
+    batch_dates = batch_dates,
+    as_of = as_of,
+    min_batch_filings = min_batch_filings,
+    max_missing_share = max_missing_share,
+    strict = TRUE
+  )
+
+  sources <- attr(irs, "sources")
+  irs_index_files <- if (is.null(sources)) {
+    list()
+  } else {
+    sources[, c("url", "retrieved_at_utc", "bytes", "sha256", "rows"), drop = FALSE]
+  }
+
+  batches <- result$batches
+  batches$published <- as.character(batches$published)
+
+  list(
+    enabled = TRUE,
+    passed = result$passed,
+    as_of = result$as_of,
+    max_missing_share = max_missing_share,
+    min_batch_filings = min_batch_filings,
+    irs_index_files = irs_index_files,
+    batches = batches,
+    failed = as.list(result$failed)
+  )
 }

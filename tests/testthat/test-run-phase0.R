@@ -89,6 +89,11 @@ test_that("run_phase0 produces parquet + dictionary + quality + manifest end-to-
   expect_true(file.exists(file.path(out_dir, "government_grants_quality.json")))
   expect_true(file.exists(file.path(out_dir, "_manifest.json")))
 
+  # The coverage gate opt-out is recorded in the manifest (inputs.index_coverage).
+  manifest <- jsonlite::read_json(file.path(out_dir, "_manifest.json"))
+  expect_false(manifest$inputs$index_coverage$enabled)
+  expect_equal(manifest$inputs$index_coverage$reason, "opted out in config")
+
   written <- arrow::read_parquet(file.path(out_dir, "government_grants.parquet"))
   expect_equal(nrow(written), 4)
   expect_setequal(
