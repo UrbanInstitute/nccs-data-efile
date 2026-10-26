@@ -65,3 +65,32 @@ test_that("complete-through is the last batch before the first gap", {
   report$missing_share <- 0
   expect_equal(complete_through_batch(report), "2026_TEOS_XML_03A")
 })
+
+test_that("the tolerance is applied at full precision", {
+  report <- data.frame(
+    xml_batch_id = c("2026_TEOS_XML_01A", "2026_TEOS_XML_02A"),
+    status = c("partial", "complete"),
+    missing_share = c(104 / 100000, 0),
+    stringsAsFactors = FALSE
+  )
+  # 104 in 100,000 is over one in a thousand and must not be accepted.
+  expect_true(is.na(complete_through_batch(report)))
+  report$missing_share[1] <- 100 / 100000
+  expect_equal(complete_through_batch(report), "2026_TEOS_XML_02A")
+})
+
+test_that("missing_share keeps full precision in the report", {
+  irs <- data.frame(object_id = sprintf("o%05d", 1:100000), return_type = "990",
+                    xml_batch_id = "2026_TEOS_XML_01A", stringsAsFactors = FALSE)
+  header <- data.frame(object_id = irs$object_id[1:(100000 - 104)],
+                       source_host = "gt990datalake-rawdata.s3.amazonaws.com", stringsAsFactors = FALSE)
+  report <- summarise_batch_coverage(irs, header, forms = "990", build_date = as.Date("2026-10-09"))
+  expect_equal(report$missing_share, 104 / 100000)
+  expect_true(is.na(complete_through_batch(report)))
+})
+
+test_that("a short-year return at a period boundary adds the following tax year", {
+  rows <- data.frame(tax_year = c(2024L, 2024L, 2023L), tax_year_ambiguous = c(FALSE, TRUE, FALSE))
+  expect_equal(header_years_for_index(rows), c(2023L, 2024L, 2025L))
+  expect_equal(header_years_for_index(data.frame(tax_year = c(2024L, 2024L))), 2024L)
+})

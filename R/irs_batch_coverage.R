@@ -146,7 +146,9 @@ summarise_batch_coverage <- function(irs, header, forms, build_date, batch_dates
   })
   report <- do.call(rbind, rows)
   report$n_missing <- report$n_irs - report$n_found
-  report$missing_share <- round(report$n_missing / report$n_irs, 4)
+  # Full precision: the complete-through tolerance compares this value, and
+  # rounding 104 in 100,000 to 0.001 would pass it (Codex review of PR #19).
+  report$missing_share <- report$n_missing / report$n_irs
   report$published <- as.Date(NA)
   if (!is.null(batch_dates)) {
     report$published <- as.Date(batch_dates$published)[match(report$xml_batch_id, batch_dates$xml_batch_id)]
@@ -183,6 +185,28 @@ complete_through_batch <- function(report, max_missing_share = 0.001) {
   ordered$xml_batch_id[last_complete]
 }
 
+#' Tax years whose header files must be read for a set of IRS index rows
+#'
+#' The IRS index gives a period end, not a tax year. The estimated year is
+#' the period's end year, or the year before when the period does not end
+#' in December. A short-year return (for example January to June 2025)
+#' belongs to tax year 2025 but is estimated as 2024, so for every row
+#' whose period does not end in December the following year is read as
+#' well. Otherwise a present filing could be reported missing (Codex
+#' review of PR #19).
+#'
+#' @param index_rows IRS index rows with `tax_year` and, when present,
+#'   `tax_year_ambiguous`.
+#' @return Sorted integer vector of tax years.
+#' @export
+header_years_for_index <- function(index_rows) {
+  years <- index_rows$tax_year
+  if ("tax_year_ambiguous" %in% names(index_rows)) {
+    years <- c(years, index_rows$tax_year[index_rows$tax_year_ambiguous] + 1L)
+  }
+  sort(unique(as.integer(years)))
+}
+
 #' Run the IRS batch coverage check for the published e-file releases
 #'
 #' For each release named, reads the IRS index files for `index_years`,
@@ -201,8 +225,9 @@ complete_through_batch <- function(report, max_missing_share = 0.001) {
 #' @return Invisibly, a named list of reports (one per release) with
 #'   attributes `build_date` and `complete_through`.
 #' @details The release build date is the `Last-Modified` of the latest
-#'   header file read. Header files are read for every tax year present in
-#'   the in-scope IRS rows; years with no file in the release are skipped.
+#'   header file read. Header files are read for every tax year the
+#'   in-scope IRS rows can belong to (`header_years_for_index()`); years
+#'   with no file in the release are skipped.
 #' @export
 run_irs_batch_coverage <- function(releases = list(efile_v3_1 = c("990", "990EZ"), efilepf_v3_1 = "990PF"),
                                    index_years = as.integer(format(Sys.Date(), "%Y")),
@@ -219,7 +244,7 @@ run_irs_batch_coverage <- function(releases = list(efile_v3_1 = c("990", "990EZ"
   for (release in names(releases)) {
     forms <- releases[[release]]
     in_scope <- irs[irs$return_type %in% forms, , drop = FALSE]
-    tax_years <- sort(unique(in_scope$tax_year))
+    tax_years <- header_years_for_index(in_scope)
     cli::cli_h2("{release}: {nrow(in_scope)} IRS filings of type {paste(forms, collapse = '/')}, tax years {min(tax_years)} to {max(tax_years)}")
 
     header <- read_release_header(release, tax_years)

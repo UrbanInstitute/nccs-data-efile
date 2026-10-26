@@ -37,6 +37,7 @@ short summary with the batch each release is complete through.
 }
 \details{
 The release build date is the \code{Last-Modified} of the latest
-header file read. Header files are read for every tax year present in
-the in-scope IRS rows; years with no file in the release are skipped.
+header file read. Header files are read for every tax year the
+in-scope IRS rows can belong to (\code{header_years_for_index()}); years
+with no file in the release are skipped.
 }
