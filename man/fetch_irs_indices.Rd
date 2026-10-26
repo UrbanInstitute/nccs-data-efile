@@ -34,7 +34,7 @@ A data.frame with columns \code{object_id}, \code{return_type},
 \description{
 The IRS publishes one index CSV per calendar year of release
 (\code{index_YYYY.csv}) listing every e-filed return it has made public, with
-the \code{XML_BATCH_ID} of the monthly ZIP the return shipped in. These are
+the \code{XML_BATCH_ID} of the monthly ZIP the return was released in. These are
 small (under 100 MB each) and are the authoritative list of what exists,
 independent of any mirror.
 }
