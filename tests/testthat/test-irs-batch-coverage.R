@@ -94,3 +94,61 @@ test_that("a short-year return at a period boundary adds the following tax year"
   expect_equal(header_years_for_index(rows), c(2023L, 2024L, 2025L))
   expect_equal(header_years_for_index(data.frame(tax_year = c(2024L, 2024L))), 2024L)
 })
+
+test_that("the published report key is stable per release", {
+  expect_equal(coverage_report_key("efile_v3_1"), "public/efile_v3_1/IRS-BATCH-COVERAGE.CSV")
+  expect_equal(coverage_report_key("efilepf_v3_1"), "public/efilepf_v3_1/IRS-BATCH-COVERAGE.CSV")
+})
+
+one_run <- function(checked_on, n_missing) {
+  data.frame(
+    release = "efile_v3_1", index_years = "2026", build_date = "2026-10-09", checked_on = checked_on,
+    xml_batch_id = c("2026_TEOS_XML_01A", "2026_TEOS_XML_02A"),
+    published = as.Date(c("2026-02-19", "2026-03-18")),
+    n_irs = c(10, 20), n_found = c(10, 20 - n_missing), n_missing = c(0, n_missing),
+    missing_share = c(0, n_missing / 20),
+    n_from_givingtuesday = c(10, 20 - n_missing), n_from_nccs_patch = 0, n_from_other = 0,
+    status = c("complete", if (n_missing == 0) "complete" else "partial"),
+    stringsAsFactors = FALSE
+  )
+}
+
+test_that("a first run becomes the whole report, as text", {
+  report <- append_coverage_report(NULL, one_run("2026-10-26", 4))
+  expect_equal(nrow(report), 2)
+  expect_true(all(vapply(report, is.character, logical(1))))
+  expect_equal(report$published, c("2026-02-19", "2026-03-18"))
+})
+
+test_that("a later run is appended below the earlier one and the history is kept", {
+  first <- append_coverage_report(NULL, one_run("2026-10-26", 4))
+  second <- append_coverage_report(first, one_run("2026-11-20", 0))
+  expect_equal(nrow(second), 4)
+  expect_equal(second$checked_on, c("2026-10-26", "2026-10-26", "2026-11-20", "2026-11-20"))
+  # The earlier run still shows the shortfall; the later run shows it closed.
+  expect_equal(second$n_missing, c("0", "4", "0", "0"))
+  expect_equal(second$status, c("complete", "partial", "complete", "complete"))
+})
+
+test_that("re-running on the same day replaces that day's rows instead of duplicating them", {
+  first <- append_coverage_report(NULL, one_run("2026-10-26", 4))
+  again <- append_coverage_report(first, one_run("2026-10-26", 2))
+  expect_equal(nrow(again), 2)
+  expect_equal(again$n_missing, c("0", "2"))
+})
+
+test_that("a report with different columns is not appended to", {
+  first <- append_coverage_report(NULL, one_run("2026-10-26", 4))
+  first$extra <- "x"
+  expect_error(append_coverage_report(first, one_run("2026-11-20", 0)), "columns")
+})
+
+test_that("the round trip through a CSV file keeps the appended report identical", {
+  first <- append_coverage_report(NULL, one_run("2026-10-26", 4))
+  path <- tempfile(fileext = ".csv")
+  utils::write.csv(first, path, row.names = FALSE)
+  read_back <- utils::read.csv(path, colClasses = "character", stringsAsFactors = FALSE)
+  expect_equal(read_back, first)
+  second <- append_coverage_report(read_back, one_run("2026-11-20", 0))
+  expect_equal(nrow(second), 4)
+})
