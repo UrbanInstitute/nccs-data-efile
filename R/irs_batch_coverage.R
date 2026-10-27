@@ -207,6 +207,108 @@ header_years_for_index <- function(index_rows) {
   sort(unique(as.integer(years)))
 }
 
+#' Key of the published coverage report for a release
+#'
+#' One stable file per release, agreed with the producer on 2026-10-27:
+#' the run date and the release build date are columns in the file, not
+#' part of its name, so a package can build the path from the release
+#' alone. Each run appends its rows; the rows with the latest `checked_on`
+#' are the current state and the rows above them are the history.
+#'
+#' @param release Release prefix under `public/`, for example `"efile_v3_1"`.
+#' @return The object key, `public/{release}/IRS-BATCH-COVERAGE.CSV`.
+#' @export
+coverage_report_key <- function(release) {
+  sprintf("public/%s/IRS-BATCH-COVERAGE.CSV", release)
+}
+
+#' Read the published coverage report of a release, if there is one
+#'
+#' @param release Release prefix under `public/`.
+#' @param bucket_url Base URL of the bucket.
+#' @return The report as a data.frame with every column read as text, or
+#'   NULL when the release has no report yet.
+#' @export
+read_coverage_report <- function(release, bucket_url = "https://nccs-efile.s3.amazonaws.com") {
+  url <- sprintf("%s/%s", bucket_url, coverage_report_key(release))
+  if (!url_exists(url)) return(NULL)
+  utils::read.csv(url, colClasses = "character", stringsAsFactors = FALSE)
+}
+
+#' Append one run's rows to the published coverage report
+#'
+#' Pure function. Rows already in the report from the same run date and
+#' index years are replaced, so running the check twice on one day does
+#' not duplicate rows. Everything else in the existing report is kept
+#' unchanged. The result is ordered by run date, then batch id, and every
+#' column is text so that the file reads back the way it was written.
+#'
+#' @param existing The published report from `read_coverage_report()`,
+#'   or NULL when there is none yet.
+#' @param new_rows One run's report for the release, as built by
+#'   `run_irs_batch_coverage()`.
+#' @return A data.frame with the columns of `new_rows`.
+#' @export
+append_coverage_report <- function(existing, new_rows) {
+  new_rows <- as.data.frame(lapply(new_rows, as.character), stringsAsFactors = FALSE)
+  if (is.null(existing) || nrow(existing) == 0) {
+    combined <- new_rows
+  } else {
+    if (!setequal(names(existing), names(new_rows))) {
+      stop("the published coverage report has columns ",
+           paste(setdiff(names(existing), names(new_rows)), collapse = ", "),
+           " that this run does not, or lacks ",
+           paste(setdiff(names(new_rows), names(existing)), collapse = ", "),
+           "; not appending")
+    }
+    same_run <- existing$checked_on %in% new_rows$checked_on &
+                existing$index_years %in% new_rows$index_years
+    combined <- rbind(existing[!same_run, names(new_rows), drop = FALSE], new_rows)
+  }
+  combined <- combined[order(combined$checked_on, combined$xml_batch_id), , drop = FALSE]
+  rownames(combined) <- NULL
+  combined
+}
+
+#' Publish one run's coverage report beside the release it describes
+#'
+#' Reads the report already at `public/{release}/IRS-BATCH-COVERAGE.CSV`
+#' (anonymous HTTPS), appends this run with `append_coverage_report()`,
+#' and uploads the result with `aws s3 cp` under the given profile. The
+#' upload overwrites the object; bucket versioning keeps the earlier copy.
+#'
+#' @param report One run's report for one release.
+#' @param release Release prefix under `public/`.
+#' @param bucket Bucket name.
+#' @param aws_profile AWS CLI profile for the upload.
+#' @param bucket_url Base URL used for the anonymous read of the existing
+#'   report.
+#' @return Invisibly, the combined report that was uploaded.
+#' @export
+publish_coverage_report <- function(report,
+                                    release,
+                                    bucket = "nccs-efile",
+                                    aws_profile = "thiya",
+                                    bucket_url = "https://nccs-efile.s3.amazonaws.com") {
+  existing <- read_coverage_report(release, bucket_url = bucket_url)
+  combined <- append_coverage_report(existing, report)
+
+  local_path <- tempfile(fileext = ".csv")
+  on.exit(unlink(local_path), add = TRUE)
+  utils::write.csv(combined, local_path, row.names = FALSE)
+
+  destination <- sprintf("s3://%s/%s", bucket, coverage_report_key(release))
+  args <- c("s3", "cp", shQuote(local_path), shQuote(destination),
+            "--content-type", "text/csv", "--profile", aws_profile)
+  status <- system2("aws", args, stdout = FALSE, stderr = "")
+  if (status != 0) {
+    stop(sprintf("aws s3 cp to %s failed (exit %s)", destination, status))
+  }
+  previous_runs <- if (is.null(existing)) 0L else length(unique(existing$checked_on))
+  cli::cli_alert_success("{release}: published {destination} ({nrow(combined)} rows, {previous_runs} earlier run{?s} kept)")
+  invisible(combined)
+}
+
 #' Run the IRS batch coverage check for the published e-file releases
 #'
 #' For each release named, reads the IRS index files for `index_years`,
@@ -222,6 +324,12 @@ header_years_for_index <- function(index_rows) {
 #' @param out_dir Directory for the CSVs. One file per release and run:
 #'   `{release}-irs-batch-coverage-{index years}-{run date}.csv`.
 #' @param skip_sync Passed to `fetch_irs_indices()` and `irs_batch_dates()`.
+#' @param publish When TRUE, each release's rows are also appended to the
+#'   published report at `public/{release}/IRS-BATCH-COVERAGE.CSV` in the
+#'   nccs-efile bucket (`publish_coverage_report()`). Off by default; the
+#'   local CSV is always written.
+#' @param aws_profile AWS CLI profile used for the upload when `publish`
+#'   is TRUE.
 #' @return Invisibly, a named list of reports (one per release) with
 #'   attributes `build_date` and `complete_through`.
 #' @details The release build date is the `Last-Modified` of the latest
@@ -233,7 +341,9 @@ run_irs_batch_coverage <- function(releases = list(efile_v3_1 = c("990", "990EZ"
                                    index_years = as.integer(format(Sys.Date(), "%Y")),
                                    config = load_config(),
                                    out_dir = "out/irs-batch-coverage",
-                                   skip_sync = FALSE) {
+                                   skip_sync = FALSE,
+                                   publish = FALSE,
+                                   aws_profile = "thiya") {
   dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
   run_date <- format(Sys.Date(), "%Y-%m-%d")
 
@@ -266,6 +376,9 @@ run_irs_batch_coverage <- function(releases = list(efile_v3_1 = c("990", "990EZ"
     cli::cli_alert_success("{release}: built {build_date}, complete through {through %||% 'none'}; wrote {out_path}")
     print(report[, c("xml_batch_id", "published", "n_irs", "n_missing", "missing_share",
                      "n_from_givingtuesday", "n_from_nccs_patch", "status")], row.names = FALSE)
+    if (publish) {
+      publish_coverage_report(report, release, aws_profile = aws_profile)
+    }
     reports[[release]] <- report
   }
   invisible(reports)

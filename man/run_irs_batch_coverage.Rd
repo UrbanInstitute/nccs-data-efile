@@ -9,11 +9,14 @@ run_irs_batch_coverage(
   index_years = as.integer(format(Sys.Date(), "\%Y")),
   config = load_config(),
   out_dir = "out/irs-batch-coverage",
-  skip_sync = FALSE
+  skip_sync = FALSE,
+  publish = FALSE,
+  aws_profile = "thiya"
 )
 }
 \arguments{
-\item{releases}{Named list: release prefix to the forms it holds, for example
+\item{releases}{Named list: release prefix to the forms it holds, for
+example
 \code{list(efile_v3_1 = c("990", "990EZ"), efilepf_v3_1 = "990PF")}.}
 
 \item{index_years}{IRS index years to read (default: the current year).}
@@ -21,9 +24,17 @@ run_irs_batch_coverage(
 \item{config}{Package config (for the IRS URL patterns and cache).}
 
 \item{out_dir}{Directory for the CSVs. One file per release and run:
-\code{{release}-irs-batch-coverage-{index years}-{run date}.csv}.}
+\verb{\{release\}-irs-batch-coverage-\{index years\}-\{run date\}.csv}.}
 
 \item{skip_sync}{Passed to \code{fetch_irs_indices()} and \code{irs_batch_dates()}.}
+
+\item{publish}{When TRUE, each release's rows are also appended to the
+published report at \code{public/{release}/IRS-BATCH-COVERAGE.CSV} in the
+nccs-efile bucket (\code{publish_coverage_report()}). Off by default; the
+local CSV is always written.}
+
+\item{aws_profile}{AWS CLI profile used for the upload when \code{publish}
+is TRUE.}
 }
 \value{
 Invisibly, a named list of reports (one per release) with
