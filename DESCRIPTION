@@ -28,6 +28,8 @@ Imports:
     xml2,
     yaml
 Suggests:
+    DBI,
+    duckdb,
     lintr,
     styler,
     testthat (>= 3.0.0)
