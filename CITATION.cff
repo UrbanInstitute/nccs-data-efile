@@ -1,0 +1,13 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "NCCS 990 e-file producer"
+type: software
+authors:
+  - family-names: Poongundranar
+    given-names: Thiyaghessan
+    affiliation: "National Center for Charitable Statistics, Urban Institute"
+  - name: "Urban Institute"
+repository-code: "https://github.com/UrbanInstitute/nccs-data-efile"
+url: "https://nccs.urban.org"
+abstract: "R package that extracts structured tables from IRS Form 990-series e-file XML and publishes versioned parquet outputs with a two-layer schema concordance."
+date-released: "2026-10-29"

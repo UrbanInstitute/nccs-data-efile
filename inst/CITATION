@@ -1,0 +1,10 @@
+citHeader("To cite the NCCS e-file producer in publications use:")
+
+bibentry(
+  bibtype = "Manual",
+  title   = "nccs.data.efile: NCCS IRS Form 990 E-File Producer",
+  author  = person("Thiyaghessan", "Poongundranar"),
+  year    = "2026",
+  note    = "R package",
+  url     = "https://github.com/UrbanInstitute/nccs-data-efile"
+)

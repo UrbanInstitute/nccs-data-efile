@@ -12,3 +12,5 @@
 ^\.claude$
 ^inst/concordance/\.gitkeep$
 ^LICENSE\.md$
+^\.mailmap$
+^CITATION\.cff$
