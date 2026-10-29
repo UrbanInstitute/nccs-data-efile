@@ -1,9 +1,10 @@
 Package: nccs.data.efile
 Title: NCCS IRS Form 990 E-File Producer
 Version: 0.0.0.9000
-Authors@R:
-    person("NCCS", role = c("aut", "cre"),
-           email = "thiyaghessan@gmail.com")
+Authors@R: c(
+    person("Thiyaghessan", "Poongundranar", email = "tpoongundranar@urban.org",
+           role = c("aut", "cre")),
+    person("Urban Institute", role = c("cph", "fnd")))
 Description: Producer pipeline for extracting structured data from IRS
     Form 990 series e-file XML filings, publishing versioned parquet
     outputs to s3://nccsdata/processed/efile/. Implements the design
