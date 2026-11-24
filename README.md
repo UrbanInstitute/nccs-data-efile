@@ -1,5 +1,7 @@
 # nccs-data-efile
 
+Maintained by Thiyaghessan Poongundranar, National Center for Charitable Statistics, Urban Institute, since May 2026.
+
 **Urban Institute's producer for the IRS Form 990 e-file data tier of the NCCS data system.**
 
 This repository turns messy IRS Form 990-series **e-file XML** into clean, versioned, analysis-ready tables published to S3. It is one of several NCCS data "producers" (alongside `nccs-data-bmf` and `nccs-data-core`), and it is the Urban-owned replacement for relying on a third party for e-file data.
